@@ -9,17 +9,17 @@
 //
 // Rules: airport name, ICAO_POS lines with Discord @mentions, ATIS in caps,
 // no markdown other than the backticks, no emojis, no links.
-import type { AirportFrequencies } from '../types/airports';
+import type { AirportFrequencies } from "../types/airports";
 
-export const NETWORK_POSITIONS = ['CTR', 'APP', 'TWR', 'GND', 'DEL'] as const;
+export const NETWORK_POSITIONS = ["CTR", "APP", "TWR", "GND", "DEL"] as const;
 export type NetworkPosition = (typeof NETWORK_POSITIONS)[number];
 
 const RT_SUFFIX: Record<NetworkPosition, string> = {
-  CTR: 'Control',
-  APP: 'Approach',
-  TWR: 'Tower',
-  GND: 'Ground',
-  DEL: 'Delivery',
+  CTR: "Control",
+  APP: "Approach",
+  TWR: "Tower",
+  GND: "Ground",
+  DEL: "Delivery",
 };
 
 export interface NetworkController {
@@ -42,38 +42,49 @@ export interface NetworkAtisInput {
   includePfTracker?: boolean;
 }
 
-export const PFTRACKER_FILE_URL = 'https://canary.project-flight.com/flight-plan/create';
+export const PFTRACKER_FILE_URL =
+  "https://canary.project-flight.com/flight-plan/create";
 
 /** "London Gatwick International Airport" -> "LONDON GATWICK" */
 export function networkAirportName(name: string, icao: string) {
   const cleaned = name
-    .replace(/\b(international|intl\.?|regional|municipal)?\s*(airport|aerodrome|airfield|arpt)\b/gi, '')
-    .replace(/\s+/g, ' ')
+    .replace(
+      /\b(international|intl\.?|regional|municipal)?\s*(airport|aerodrome|airfield|arpt)\b/gi,
+      "",
+    )
+    .replace(/\s+/g, " ")
     .trim();
   return (cleaned || icao).toUpperCase();
 }
 
 /** First frequency for a position: exact key (GND) or a prefixed one (S_GND, N_GND). */
-export function frequencyFor(frequencies: AirportFrequencies, position: NetworkPosition) {
+export function frequencyFor(
+  frequencies: AirportFrequencies,
+  position: NetworkPosition,
+) {
   if (frequencies[position]) return frequencies[position];
-  const key = Object.keys(frequencies).find((k) => k.toUpperCase().endsWith(`_${position}`));
+  const key = Object.keys(frequencies).find((k) =>
+    k.toUpperCase().endsWith(`_${position}`),
+  );
   return key ? frequencies[key] : undefined;
 }
 
 /** Strips anything the network bans from the ATIS body: markdown, emojis, links, extra whitespace. */
 export function cleanAtisBody(text: string) {
   return text
-    .replace(/https?:\/\/\S+/gi, '')
-    .replace(/[`*_~|>#]/g, '')
-    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '')
-    .replace(/\s+/g, ' ')
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/[`*_~|>#]/g, "")
+    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, "")
+    .replace(/\s+/g, " ")
     .trim()
     .toUpperCase();
 }
 
 export function buildNetworkAtis(input: NetworkAtisInput): string {
   const icao = input.icao.trim().toUpperCase();
-  const stem = (input.controlName || networkAirportName(input.airportName, icao)).trim();
+  const stem = (
+    input.controlName || networkAirportName(input.airportName, icao)
+  ).trim();
   const stemTitle = stem
     .toLowerCase()
     .replace(/\b\p{L}/gu, (c) => c.toUpperCase());
@@ -98,8 +109,10 @@ export function buildNetworkAtis(input: NetworkAtisInput): string {
     if (!freq) continue;
     const ids = dedicated.get(pos) ?? (everything.length ? everything : []);
     if (!ids.length) continue;
-    const mentions = ids.map((id) => `<@${id}>`).join(' ');
-    lines.push(`${icao}_${pos} "${stemTitle} ${RT_SUFFIX[pos]}" (${freq}): ${mentions}`);
+    const mentions = ids.map((id) => `<@${id}>`).join(" ");
+    lines.push(
+      `${icao}_${pos} "${stemTitle} ${RT_SUFFIX[pos]}" (${freq}): ${mentions}`,
+    );
   }
 
   const header = `${networkAirportName(input.airportName, icao)} ${icao}`;
@@ -107,6 +120,65 @@ export function buildNetworkAtis(input: NetworkAtisInput): string {
   // Flight plan filing links are the only links the network allows. <> stops Discord previews.
   const filing: string[] = [];
   if (input.formLink) filing.push(`FILE YOUR FLIGHT PLAN: <${input.formLink}>`);
-  if (input.includePfTracker) filing.push(`OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`);
-  return [header, '', ...lines, '', '```' + body + '```', ...(filing.length ? ['', ...filing] : [])].join('\n');
+  if (input.includePfTracker)
+    filing.push(`OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`);
+  return [
+    header,
+    "",
+    ...lines,
+    "",
+    "```" + body + "```",
+    ...(filing.length ? ["", ...filing] : []),
+  ].join("\n");
+}
+
+// ---------- PF Radar: one controller, every airport ----------
+
+export const PF_RADAR = {
+  position: "PF_RDR",
+  callsign: "PF Radar",
+  frequency: "132.555",
+} as const;
+
+export interface RadarNetworkAtisInput {
+  controllers: NetworkController[];
+  airports: { icao: string; text: string | null }[];
+  formLink?: string | null;
+  includePfTracker?: boolean;
+}
+
+/**
+ * PROJECT FLIGHT
+ *
+ * PF_RDR "PF Radar" (132.555): <@id>
+ *
+ * ```LONDON GATWICK ...```
+ * ```CARDIFF ...```
+ */
+export function buildRadarNetworkAtis(input: RadarNetworkAtisInput): string {
+  const ids = [
+    ...new Set(
+      input.controllers.map((c) => c.id).filter((id) => /^\d{5,25}$/.test(id)),
+    ),
+  ];
+  const lines = ids.length
+    ? [
+        `${PF_RADAR.position} "${PF_RADAR.callsign}" (${PF_RADAR.frequency}): ${ids.map((id) => `<@${id}>`).join(" ")}`,
+      ]
+    : [];
+  const blocks = input.airports
+    .filter((a) => a.text)
+    .map((a) => "```" + cleanAtisBody(a.text!) + "```");
+  const filing: string[] = [];
+  if (input.formLink) filing.push(`FILE YOUR FLIGHT PLAN: <${input.formLink}>`);
+  if (input.includePfTracker)
+    filing.push(`OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`);
+  return [
+    "PROJECT FLIGHT",
+    "",
+    ...lines,
+    "",
+    blocks.join("\n\n"),
+    ...(filing.length ? ["", ...filing] : []),
+  ].join("\n");
 }

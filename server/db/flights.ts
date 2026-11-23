@@ -15,6 +15,7 @@ import {
   getWakeTurbulence,
 } from '../utils/flightUtils.js';
 import crypto from 'crypto';
+import { getAirportData } from '../utils/getData.js';
 import { sql } from 'kysely';
 import { incrementStat } from '../utils/statisticsCache.js';
 import type { FlightsTable } from './types/connection/main/FlightsTable.js';
@@ -753,7 +754,22 @@ export async function addFlight(
     }
   }
 
-  if (!flightData.runway && sessionForDefaults?.active_runway) {
+  // StripLink: in a PF Radar session flights come from every airport, so the session's
+  // runway only applies to its own airport; others get their departure airport's first runway.
+  const radarElsewhere =
+    sessionForDefaults?.is_radar &&
+    typeof flightData.departure === 'string' &&
+    flightData.departure !== sessionForDefaults.airport_icao?.toUpperCase();
+  if (!flightData.runway && radarElsewhere) {
+    try {
+      const airport = (getAirportData() as { icao: string; runways?: string[] }[]).find(
+        (a) => a.icao === flightData.departure
+      );
+      if (airport?.runways?.[0]) flightData.runway = airport.runways[0];
+    } catch (error) {
+      console.error('Error reading airport data for radar runway:', error);
+    }
+  } else if (!flightData.runway && sessionForDefaults?.active_runway) {
     flightData.runway = sessionForDefaults.active_runway;
   }
 

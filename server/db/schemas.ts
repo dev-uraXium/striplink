@@ -1230,7 +1230,8 @@ export async function ensureSessionsExternalSessionColumn() {
 export async function ensureSessionsGoogleFormColumns() {
   await sql`
     ALTER TABLE sessions
-    ADD COLUMN IF NOT EXISTS form_webhook_secret varchar(64)
+    ADD COLUMN IF NOT EXISTS form_webhook_secret varchar(64),
+    ADD COLUMN IF NOT EXISTS is_radar boolean NOT NULL DEFAULT false
   `.execute(mainDb);
   await sql`
     ALTER TABLE sessions

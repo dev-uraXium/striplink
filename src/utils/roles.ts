@@ -83,6 +83,12 @@ export const AVAILABLE_PERMISSIONS = [
     description: 'Manage update modals and announcements',
   },
   {
+    key: 'pf_radar',
+    label: 'PF Radar',
+    description:
+      'Create PF Radar sessions: one controller covering every Project Flight airport, with an ATIS for all of them',
+  },
+  {
     key: 'pfatc_sector',
     label: 'PFATC Sector Controller',
     description:

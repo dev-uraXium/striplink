@@ -20,6 +20,8 @@ interface CreateSessionParams {
   isAdvancedATC?: boolean;
   developerApiKeyId?: string | null;
   externalSession?: boolean | null;
+  /** StripLink: PF Radar session covering every airport */
+  isRadar?: boolean;
 }
 
 export async function createSession({
@@ -34,6 +36,7 @@ export async function createSession({
   isTutorial,
   developerApiKeyId,
   externalSession,
+  isRadar,
 }: CreateSessionParams & { isTutorial?: boolean }) {
   const validSessionId = validateSessionId(sessionId);
 
@@ -64,6 +67,7 @@ export async function createSession({
       external_session: externalSession ?? null,
       // StripLink: Google Form intake on by default (the Submit Link hands out the form)
       form_webhook_secret: crypto.randomBytes(24).toString('base64url'),
+      is_radar: Boolean(isRadar),
       ...(developerApiKeyId ? { developer_api_key_id: developerApiKeyId } : {}),
     };
     await mainDb.insertInto('sessions').values(baseValues).execute();
@@ -130,6 +134,7 @@ export async function getSessionsByUser(userId: string) {
       'created_by',
       'is_pfatc',
       'is_advanced_atc',
+      'is_radar',
       'custom_name',
       'refreshed_at',
     ])

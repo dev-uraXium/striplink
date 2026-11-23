@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNetworkAtis, networkAirportName, cleanAtisBody } from '../../src/lib/networkAtis';
+import { buildNetworkAtis, buildRadarNetworkAtis, networkAirportName, cleanAtisBody } from '../../src/lib/networkAtis';
 
 const gatwick = {
   icao: 'EGKK',
@@ -69,5 +69,25 @@ describe('network ATIS format', () => {
     )).toBe(true);
     const plain = buildNetworkAtis({ ...gatwick, atisText: atis, controllers: [] });
     expect(plain.endsWith('```')).toBe(true);
+  });
+
+  it('builds the PF Radar post: one radar line, a block per airport', () => {
+    const out = buildRadarNetworkAtis({
+      controllers: [{ id: '111111111111111111', position: 'ALL' }],
+      airports: [
+        { icao: 'EGKK', text: 'gatwick information a... qnh 1021...' },
+        { icao: 'X2BH', text: null },
+        { icao: 'EGFF', text: 'cardiff information a...' },
+      ],
+    });
+    expect(out).toBe(
+      [
+        'PROJECT FLIGHT',
+        '',
+        'PF_RDR "PF Radar" (132.555): <@111111111111111111>',
+        '',
+        '```GATWICK INFORMATION A... QNH 1021...```\n\n```CARDIFF INFORMATION A...```',
+      ].join('\n')
+    );
   });
 });

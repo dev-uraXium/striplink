@@ -37,3 +37,32 @@ export async function generateATIS(
 
   return response.json();
 }
+
+export interface RadarAirportAtis {
+  icao: string;
+  name: string;
+  runway: string | null;
+  text: string | null;
+  error?: string;
+}
+
+export interface RadarAtisResponse {
+  letter: string;
+  timestamp: string;
+  airports: RadarAirportAtis[];
+  atisText: string;
+}
+
+/** StripLink PF Radar: one ATIS per airport. */
+export async function generateRadarATIS(sessionId: string, ident: string): Promise<RadarAtisResponse> {
+  const response = await apiFetch(`${API_BASE_URL}/api/atis/generate-radar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ sessionId, ident }),
+  });
+  if (!response.ok) {
+    await apiError(response, `Server responded with ${response.status}`);
+  }
+  return response.json();
+}

@@ -1,45 +1,45 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { FlightsPageSkeleton } from '../components/skeletons/PageSkeletons';
-import { useParams, useSearchParams } from 'react-router';
-import { useMediaQuery } from 'react-responsive';
-import { fetchFlights, addFlight } from '../utils/fetch/flights';
-import { fetchSession, updateSession } from '../utils/fetch/sessions';
-import { createFlightsSocket } from '../sockets/flightsSocket';
-import { createArrivalsSocket } from '../sockets/arrivalsSocket';
-import { createSessionUsersSocket } from '../sockets/sessionUsersSocket';
-import { useAuth } from '../hooks/auth/useAuth';
-import { playSoundWithSettings } from '../utils/playSound';
-import { useSettings } from '../hooks/settings/useSettings';
-import { toast } from 'sonner';
-import { steps } from '../components/tutorial/TutorialStepsFlights';
-import { updateTutorialStatus } from '../utils/fetch/auth';
-import type { Flight } from '../types/flight';
-import type { Position } from '../types/session';
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { FlightsPageSkeleton } from "../components/skeletons/PageSkeletons";
+import { useParams, useSearchParams } from "react-router";
+import { useMediaQuery } from "react-responsive";
+import { fetchFlights, addFlight } from "../utils/fetch/flights";
+import { fetchSession, updateSession } from "../utils/fetch/sessions";
+import { createFlightsSocket } from "../sockets/flightsSocket";
+import { createArrivalsSocket } from "../sockets/arrivalsSocket";
+import { createSessionUsersSocket } from "../sockets/sessionUsersSocket";
+import { useAuth } from "../hooks/auth/useAuth";
+import { playSoundWithSettings } from "../utils/playSound";
+import { useSettings } from "../hooks/settings/useSettings";
+import { toast } from "sonner";
+import { steps } from "../components/tutorial/TutorialStepsFlights";
+import { updateTutorialStatus } from "../utils/fetch/auth";
+import type { Flight } from "../types/flight";
+import type { Position } from "../types/session";
 import type {
   ArrivalsTableColumnSettings,
   DepartureTableColumnSettings,
-} from '../types/settings';
-import type { FieldEditingState } from '../sockets/sessionUsersSocket';
+} from "../types/settings";
+import type { FieldEditingState } from "../sockets/sessionUsersSocket";
 import Joyride, {
   type CallBackProps,
   STATUS,
-} from 'react-joyride-react19-compat';
-import { usePostHog } from '@posthog/react';
-import { trackTutorialEvent } from '../utils/tutorialTracking';
-import { useBackgroundImage } from '../hooks/settings/useBackgroundImage';
-import Navbar from '../components/Navbar';
-import Toolbar from '../components/tools/Toolbar';
-import DepartureTable from '../components/tables/DepartureTable';
-import ArrivalsTable from '../components/tables/ArrivalsTable';
-import CombinedFlightsTable from '../components/tables/CombinedFlightsTable';
-import AccessDenied from '../components/AccessDenied';
-import AddCustomFlightModal from '../components/modals/AddCustomFlightModal';
-import ContactAcarsSidebar from '../components/tools/ContactAcarsSidebar';
-import CustomTooltip from '../components/tutorial/CustomTooltip';
-import ChartDrawer from '../components/tools/ChartDrawer';
-import Button from '../components/common/Button';
-import FlightTableSkeleton from '../components/tables/FlightTableSkeleton';
-import { hasAdvancedNetworkFeatures } from '../utils/sessionKind';
+} from "react-joyride-react19-compat";
+import { usePostHog } from "@posthog/react";
+import { trackTutorialEvent } from "../utils/tutorialTracking";
+import { useBackgroundImage } from "../hooks/settings/useBackgroundImage";
+import Navbar from "../components/Navbar";
+import Toolbar from "../components/tools/Toolbar";
+import DepartureTable from "../components/tables/DepartureTable";
+import ArrivalsTable from "../components/tables/ArrivalsTable";
+import CombinedFlightsTable from "../components/tables/CombinedFlightsTable";
+import AccessDenied from "../components/AccessDenied";
+import AddCustomFlightModal from "../components/modals/AddCustomFlightModal";
+import ContactAcarsSidebar from "../components/tools/ContactAcarsSidebar";
+import CustomTooltip from "../components/tutorial/CustomTooltip";
+import ChartDrawer from "../components/tools/ChartDrawer";
+import Button from "../components/common/Button";
+import FlightTableSkeleton from "../components/tables/FlightTableSkeleton";
+import { hasAdvancedNetworkFeatures } from "../utils/sessionKind";
 
 interface SessionData {
   sessionId: string;
@@ -51,6 +51,8 @@ interface SessionData {
     timestamp?: string;
   };
   isPFATC: boolean;
+  /** StripLink: PF Radar session covering every airport */
+  isRadar?: boolean;
   isAdvancedATC?: boolean;
   feedbackEnabled?: boolean;
 }
@@ -58,8 +60,8 @@ interface SessionData {
 export default function Flights() {
   const { sessionId } = useParams<{ sessionId?: string }>();
   const [searchParams] = useSearchParams();
-  const accessId = searchParams.get('accessId') ?? undefined;
-  const startTutorial = searchParams.get('tutorial') === 'true';
+  const accessId = searchParams.get("accessId") ?? undefined;
+  const startTutorial = searchParams.get("tutorial") === "true";
   const isMobile = useMediaQuery({ maxWidth: 1000 });
   const posthog = usePostHog();
 
@@ -80,15 +82,15 @@ export default function Flights() {
   const [startupSoundPlayed, setStartupSoundPlayed] = useState(false);
   const { user } = useAuth();
   const { settings } = useSettings();
-  const [currentView, setCurrentView] = useState<'departures' | 'arrivals'>(
-    'departures'
+  const [currentView, setCurrentView] = useState<"departures" | "arrivals">(
+    "departures",
   );
   const [externalArrivals, setExternalArrivals] = useState<Flight[]>([]);
   const [arrivalsLoading, setArrivalsLoading] = useState(true);
   const [localHiddenFlights, setLocalHiddenFlights] = useState<
     Set<string | number>
   >(new Set());
-  const [position, setPosition] = useState<Position>('ALL');
+  const [position, setPosition] = useState<Position>("ALL");
   const [fieldEditingStates, setFieldEditingStates] = useState<
     FieldEditingState[]
   >([]);
@@ -99,7 +101,7 @@ export default function Flights() {
     Flight[]
   >([]);
   const [customArrivalFlights, setCustomArrivalFlights] = useState<Flight[]>(
-    []
+    [],
   );
   const [showAddDepartureModal, setShowAddDepartureModal] = useState(false);
   const [showAddArrivalModal, setShowAddArrivalModal] = useState(false);
@@ -108,7 +110,7 @@ export default function Flights() {
     Set<string | number>
   >(new Set());
   const [activeAcarsFlightData, setActiveAcarsFlightData] = useState<Flight[]>(
-    []
+    [],
   );
   const [showChartsDrawer, setShowChartsDrawer] = useState(false);
   const userRef = useRef(user);
@@ -126,11 +128,11 @@ export default function Flights() {
     const currentUser = userRef.current;
     if (currentUser) {
       playSoundWithSettings(
-        'chatNotificationSound',
+        "chatNotificationSound",
         currentUser.settings,
-        0.7
+        0.7,
       ).catch((error) => {
-        console.warn('Failed to play chat notification sound:', error);
+        console.warn("Failed to play chat notification sound:", error);
       });
     }
   }, []);
@@ -153,13 +155,13 @@ export default function Flights() {
 
   useEffect(() => {
     if (!sessionId) {
-      setAccessError('Session ID is required');
+      setAccessError("Session ID is required");
       setValidatingAccess(false);
       return;
     }
 
     if (!accessId) {
-      setAccessError('Access ID is required. Please use a valid session link.');
+      setAccessError("Access ID is required. Please use a valid session link.");
       setValidatingAccess(false);
       return;
     }
@@ -181,25 +183,25 @@ export default function Flights() {
     setLastSessionId(sessionId);
 
     Promise.all([
-      fetchSession(sessionId, accessId ?? '').catch((error) => {
-        console.error('Error fetching session:', error);
+      fetchSession(sessionId, accessId ?? "").catch((error) => {
+        console.error("Error fetching session:", error);
         if (
-          error.message?.includes('403') ||
-          error.message?.includes('Invalid session access')
+          error.message?.includes("403") ||
+          error.message?.includes("Invalid session access")
         ) {
-          setAccessError('Invalid access link or session expired');
+          setAccessError("Invalid access link or session expired");
         } else if (
-          error.message?.includes('404') ||
-          error.message?.includes('not found')
+          error.message?.includes("404") ||
+          error.message?.includes("not found")
         ) {
-          setAccessError('Session not found');
+          setAccessError("Session not found");
         } else {
-          setAccessError('Unable to access session');
+          setAccessError("Unable to access session");
         }
         return null;
       }),
       fetchFlights(sessionId).catch((error) => {
-        console.error('Error fetching flights:', error);
+        console.error("Error fetching flights:", error);
         return [];
       }),
     ])
@@ -210,10 +212,10 @@ export default function Flights() {
         setFlights(flightsData);
         setInitialLoadComplete(true);
         if (!startupSoundPlayed && user && settings) {
-          playSoundWithSettings('startupSound', settings, 0.7).catch(
+          playSoundWithSettings("startupSound", settings, 0.7).catch(
             (error) => {
-              console.warn('Failed to play session startup sound:', error);
-            }
+              console.warn("Failed to play session startup sound:", error);
+            },
           );
           setStartupSoundPlayed(true);
         }
@@ -258,10 +260,10 @@ export default function Flights() {
 
       const currentSettings = settingsRef.current;
       if (currentSettings) {
-        playSoundWithSettings('newStripSound', currentSettings, 0.7).catch(
+        playSoundWithSettings("newStripSound", currentSettings, 0.7).catch(
           (error) => {
-            console.warn('Failed to play new strip sound:', error);
-          }
+            console.warn("Failed to play new strip sound:", error);
+          },
         );
       }
     };
@@ -277,8 +279,8 @@ export default function Flights() {
     const socket = createFlightsSocket(
       sessionId,
       accessId,
-      user?.userId || '',
-      user?.username || '',
+      user?.userId || "",
+      user?.username || "",
       handleFlightUpdate,
       handleFlightAdded,
       handleFlightDeleted,
@@ -287,11 +289,11 @@ export default function Flights() {
         flightId?: string | number;
         error: string;
       }) => {
-        console.error('Flight websocket error:', error);
-        toast.error(error.error || 'Flight update failed');
-      }
+        console.error("Flight websocket error:", error);
+        toast.error(error.error || "Flight update failed");
+      },
     );
-    socket.socket.on('sessionUpdated', (updates) => {
+    socket.socket.on("sessionUpdated", (updates) => {
       setSession((prev) => (prev ? { ...prev, ...updates } : null));
     });
     setFlightsSocket(socket);
@@ -310,13 +312,13 @@ export default function Flights() {
   const handleIssuePDC = async (flightId: string | number, pdcText: string) => {
     const socket = flightsSocket?.socket;
     if (!socket?.connected) {
-      throw new Error('Not connected to the session');
+      throw new Error("Not connected to the session");
     }
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timeout);
-        socket.off('pdcIssued', onIssued);
-        socket.off('flightError', onError);
+        socket.off("pdcIssued", onIssued);
+        socket.off("flightError", onError);
       };
       const onIssued = (payload: { flightId: string | number }) => {
         if (String(payload.flightId) !== String(flightId)) return;
@@ -328,7 +330,7 @@ export default function Flights() {
         flightId?: string | number;
         error: string;
       }) => {
-        if (err.action !== 'issuePDC') return;
+        if (err.action !== "issuePDC") return;
         if (err.flightId != null && String(err.flightId) !== String(flightId))
           return;
         cleanup();
@@ -336,11 +338,11 @@ export default function Flights() {
       };
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error('The server did not confirm the PDC'));
+        reject(new Error("The server did not confirm the PDC"));
       }, 8000);
-      socket.on('pdcIssued', onIssued);
-      socket.on('flightError', onError);
-      socket.emit('issuePDC', { flightId, pdcText });
+      socket.on("pdcIssued", onIssued);
+      socket.on("flightError", onError);
+      socket.emit("issuePDC", { flightId, pdcText });
     });
 
     setFlashingPDCIds((prev) => {
@@ -358,8 +360,8 @@ export default function Flights() {
         const response = await fetch(
           `${import.meta.env.VITE_SERVER_URL}/api/flights/acars/active`,
           {
-            credentials: 'include',
-          }
+            credentials: "include",
+          },
         );
 
         if (response.ok) {
@@ -379,12 +381,12 @@ export default function Flights() {
     flightId: string | number,
     message: string,
     station: string,
-    position: string
+    position: string,
   ) => {
     if (!flightsSocket?.socket) {
-      throw new Error('No flights socket');
+      throw new Error("No flights socket");
     }
-    flightsSocket.socket.emit('contactMe', {
+    flightsSocket.socket.emit("contactMe", {
       flightId,
       message,
       station,
@@ -421,14 +423,14 @@ export default function Flights() {
       },
       // onArrivalError
       (error) => {
-        console.error('Arrival websocket error:', error);
-        toast.error(error?.error || 'Arrival update failed');
+        console.error("Arrival websocket error:", error);
+        toast.error(error?.error || "Arrival update failed");
       },
       // onInitialExternalArrivals
       (flights: Flight[]) => {
         setExternalArrivals(flights);
         setArrivalsLoading(false);
-      }
+      },
     );
     setArrivalsSocket(socket);
     return () => {
@@ -482,19 +484,19 @@ export default function Flights() {
       handleMentionReceived,
       (editingStates: FieldEditingState[]) =>
         setFieldEditingStates(editingStates),
-      'ALL'
+      "ALL",
     );
 
     setSessionUsersSocket(socket);
 
     if (socket) {
-      socket.on('atisUpdate', handleAtisUpdateFromSocket);
+      socket.on("atisUpdate", handleAtisUpdateFromSocket);
     }
 
     return () => {
       sessionUsersSocketConnectedRef.current = false;
       if (socket) {
-        socket.off('atisUpdate', handleAtisUpdateFromSocket);
+        socket.off("atisUpdate", handleAtisUpdateFromSocket);
         socket.disconnect();
       }
     };
@@ -526,15 +528,15 @@ export default function Flights() {
       });
     };
 
-    flightsSocket.socket.on('pdcRequest', onPdcRequest);
+    flightsSocket.socket.on("pdcRequest", onPdcRequest);
     return () => {
-      flightsSocket.socket.off('pdcRequest', onPdcRequest);
+      flightsSocket.socket.off("pdcRequest", onPdcRequest);
     };
   }, [flightsSocket]);
 
   const handleToggleClearance = (
     flightId: string | number,
-    checked: boolean
+    checked: boolean,
   ) => {
     handleFlightUpdate(flightId, { clearance: checked });
 
@@ -549,9 +551,9 @@ export default function Flights() {
 
   const handleFlightUpdate = (
     flightId: string | number,
-    updates: Partial<Flight>
+    updates: Partial<Flight>,
   ) => {
-    if (Object.prototype.hasOwnProperty.call(updates, 'hidden')) {
+    if (Object.prototype.hasOwnProperty.call(updates, "hidden")) {
       if (updates.hidden) {
         setLocalHiddenFlights((prev) => new Set(prev).add(flightId));
       } else {
@@ -565,11 +567,11 @@ export default function Flights() {
     }
 
     const isCustomDeparture = customDepartureFlights.some(
-      (f) => f.id === flightId
+      (f) => f.id === flightId,
     );
     if (isCustomDeparture) {
       setCustomDepartureFlights((prev) =>
-        prev.map((f) => (f.id === flightId ? { ...f, ...updates } : f))
+        prev.map((f) => (f.id === flightId ? { ...f, ...updates } : f)),
       );
       return;
     }
@@ -577,7 +579,7 @@ export default function Flights() {
     const isCustomArrival = customArrivalFlights.some((f) => f.id === flightId);
     if (isCustomArrival) {
       setCustomArrivalFlights((prev) =>
-        prev.map((f) => (f.id === flightId ? { ...f, ...updates } : f))
+        prev.map((f) => (f.id === flightId ? { ...f, ...updates } : f)),
       );
       return;
     }
@@ -591,22 +593,22 @@ export default function Flights() {
     } else if (flightsSocket?.socket?.connected) {
       flightsSocket.updateFlight(flightId, updates);
     } else {
-      console.warn('Socket not connected, updating local state only');
+      console.warn("Socket not connected, updating local state only");
       setFlights((prev) =>
         prev.map((flight) =>
-          flight.id === flightId ? { ...flight, ...updates } : flight
-        )
+          flight.id === flightId ? { ...flight, ...updates } : flight,
+        ),
       );
     }
   };
 
   const handleFlightDelete = (flightId: string | number) => {
     const isCustomDeparture = customDepartureFlights.some(
-      (f) => f.id === flightId
+      (f) => f.id === flightId,
     );
     if (isCustomDeparture) {
       setCustomDepartureFlights((prev) =>
-        prev.filter((f) => f.id !== flightId)
+        prev.filter((f) => f.id !== flightId),
       );
       return;
     }
@@ -620,7 +622,7 @@ export default function Flights() {
     if (flightsSocket?.socket?.connected) {
       flightsSocket.deleteFlight(flightId);
     } else {
-      console.warn('Socket not connected, updating local state only');
+      console.warn("Socket not connected, updating local state only");
       setFlights((prev) => prev.filter((flight) => flight.id !== flightId));
     }
   };
@@ -629,19 +631,19 @@ export default function Flights() {
     if (!sessionId) return;
 
     const newFlightData: Partial<Flight> = {
-      callsign: flightData.callsign || '',
-      aircraft: flightData.aircraft || '',
-      departure: session?.airportIcao || '',
-      arrival: flightData.arrival || '',
-      flight_type: flightData.flight_type || 'IFR',
+      callsign: flightData.callsign || "",
+      aircraft: flightData.aircraft || "",
+      departure: session?.airportIcao || "",
+      arrival: flightData.arrival || "",
+      flight_type: flightData.flight_type || "IFR",
       stand: flightData.stand,
       runway: flightData.runway,
       sid: flightData.sid,
       cruisingFL: flightData.cruisingFL,
       clearedFL: flightData.clearedFL,
       squawk: flightData.squawk,
-      wtc: flightData.wtc || 'M',
-      status: flightData.status || 'PENDING',
+      wtc: flightData.wtc || "M",
+      status: flightData.status || "PENDING",
       remark: flightData.remark,
       hidden: false,
     };
@@ -649,11 +651,11 @@ export default function Flights() {
     try {
       await addFlight(sessionId, newFlightData);
     } catch (error) {
-      console.error('Failed to add custom departure:', error);
+      console.error("Failed to add custom departure:", error);
       toast.error(
         error instanceof Error
           ? `Failed to add custom departure: ${error.message}`
-          : 'Failed to add custom departure'
+          : "Failed to add custom departure",
       );
     }
   };
@@ -662,19 +664,19 @@ export default function Flights() {
     if (!sessionId) return;
 
     const newFlightData: Partial<Flight> = {
-      callsign: flightData.callsign || '',
-      aircraft: flightData.aircraft || '',
-      departure: flightData.departure || '',
-      arrival: session?.airportIcao || '',
-      flight_type: flightData.flight_type || 'IFR',
+      callsign: flightData.callsign || "",
+      aircraft: flightData.aircraft || "",
+      departure: flightData.departure || "",
+      arrival: session?.airportIcao || "",
+      flight_type: flightData.flight_type || "IFR",
       gate: flightData.gate,
       runway: flightData.runway,
       star: flightData.star,
       cruisingFL: flightData.cruisingFL,
       clearedFL: flightData.clearedFL,
       squawk: flightData.squawk,
-      wtc: flightData.wtc || 'M',
-      status: flightData.status || 'APPR',
+      wtc: flightData.wtc || "M",
+      status: flightData.status || "APPR",
       remark: flightData.remark,
       hidden: false,
     };
@@ -682,11 +684,11 @@ export default function Flights() {
     try {
       await addFlight(sessionId, newFlightData);
     } catch (error) {
-      console.error('Failed to add custom arrival:', error);
+      console.error("Failed to add custom arrival:", error);
       toast.error(
         error instanceof Error
           ? `Failed to add custom arrival: ${error.message}`
-          : 'Failed to add custom arrival'
+          : "Failed to add custom arrival",
       );
     }
   };
@@ -694,23 +696,23 @@ export default function Flights() {
   const handleRunwayChange = async (selectedRunway: string) => {
     if (!sessionId) return;
     try {
-      await updateSession(sessionId, accessId ?? '', {
+      await updateSession(sessionId, accessId ?? "", {
         activeRunway: selectedRunway,
       });
       setSession((prev) =>
-        prev ? { ...prev, activeRunway: selectedRunway } : null
+        prev ? { ...prev, activeRunway: selectedRunway } : null,
       );
       if (flightsSocket?.socket?.connected) {
         flightsSocket.updateSession({ activeRunway: selectedRunway });
       } else {
-        console.warn('Socket not connected, runway updated via API only');
+        console.warn("Socket not connected, runway updated via API only");
       }
     } catch (error) {
-      console.error('Failed to update runway:', error);
+      console.error("Failed to update runway:", error);
       toast.error(
         error instanceof Error
           ? `Failed to update runway: ${error.message}`
-          : 'Failed to update runway'
+          : "Failed to update runway",
       );
     }
   };
@@ -719,7 +721,7 @@ export default function Flights() {
     if (!sessionId) return;
     const next = !(session?.feedbackEnabled ?? true);
     try {
-      await updateSession(sessionId, accessId ?? '', {
+      await updateSession(sessionId, accessId ?? "", {
         feedbackEnabled: next,
       });
       setSession((prev) => (prev ? { ...prev, feedbackEnabled: next } : null));
@@ -727,35 +729,35 @@ export default function Flights() {
         flightsSocket.updateSession({ feedbackEnabled: next });
       } else {
         console.warn(
-          'Socket not connected, feedback setting updated via API only'
+          "Socket not connected, feedback setting updated via API only",
         );
       }
     } catch (error) {
-      console.error('Failed to update feedback setting:', error);
+      console.error("Failed to update feedback setting:", error);
       toast.error(
         error instanceof Error
           ? `Failed to update feedback setting: ${error.message}`
-          : 'Failed to update feedback setting'
+          : "Failed to update feedback setting",
       );
     }
   };
 
-  const handleViewChange = (view: 'departures' | 'arrivals') => {
+  const handleViewChange = (view: "departures" | "arrivals") => {
     setCurrentView(view);
   };
 
   const getAllowedStatuses = (pos: Position): string[] => {
     switch (pos) {
-      case 'ALL':
+      case "ALL":
         return [];
-      case 'DEL':
-        return ['PENDING', 'STUP'];
-      case 'GND':
-        return ['STUP', 'PUSH', 'TAXI'];
-      case 'TWR':
-        return ['TAXI', 'RWY', 'DEPA'];
-      case 'APP':
-        return ['RWY', 'DEPA'];
+      case "DEL":
+        return ["PENDING", "STUP"];
+      case "GND":
+        return ["STUP", "PUSH", "TAXI"];
+      case "TWR":
+        return ["TAXI", "RWY", "DEPA"];
+      case "APP":
+        return ["RWY", "DEPA"];
       default:
         return [];
     }
@@ -765,8 +767,9 @@ export default function Flights() {
     const regularDepartures = flights
       .filter(
         (flight) =>
+          session?.isRadar ||
           flight.departure?.toUpperCase() ===
-          session?.airportIcao?.toUpperCase()
+            session?.airportIcao?.toUpperCase(),
       )
       .map((flight) => ({
         ...flight,
@@ -775,10 +778,10 @@ export default function Flights() {
 
     let allDepartures = [...regularDepartures, ...customDepartureFlights];
 
-    if (position !== 'ALL') {
+    if (position !== "ALL") {
       const allowedStatuses = getAllowedStatuses(position);
       allDepartures = allDepartures.filter((flight) =>
-        allowedStatuses.includes(flight.status || '')
+        allowedStatuses.includes(flight.status || ""),
       );
     }
 
@@ -794,7 +797,8 @@ export default function Flights() {
   const arrivalFlights = useMemo(() => {
     const ownArrivals = flights.filter(
       (flight) =>
-        flight.arrival?.toUpperCase() === session?.airportIcao?.toUpperCase()
+        session?.isRadar ||
+        flight.arrival?.toUpperCase() === session?.airportIcao?.toUpperCase(),
     );
 
     let baseArrivals = ownArrivals;
@@ -822,16 +826,17 @@ export default function Flights() {
   const filteredFlights = useMemo(() => {
     let baseFlights: Flight[] = [];
 
-    if (currentView === 'arrivals') {
+    if (currentView === "arrivals") {
       const ownArrivals = flights.filter(
         (flight) =>
-          flight.arrival?.toUpperCase() === session?.airportIcao?.toUpperCase()
+          session?.isRadar ||
+          flight.arrival?.toUpperCase() === session?.airportIcao?.toUpperCase(),
       );
 
       if (session && hasAdvancedNetworkFeatures(session)) {
         const ownIds = new Set(ownArrivals.map((f) => f.id));
         const dedupedExternal = externalArrivals.filter(
-          (f) => !ownIds.has(f.id)
+          (f) => !ownIds.has(f.id),
         );
         baseFlights = [...ownArrivals, ...dedupedExternal];
       } else {
@@ -842,17 +847,18 @@ export default function Flights() {
     } else {
       baseFlights = flights.filter(
         (flight) =>
+          session?.isRadar ||
           flight.departure?.toUpperCase() ===
-          session?.airportIcao?.toUpperCase()
+            session?.airportIcao?.toUpperCase(),
       );
 
       baseFlights = [...baseFlights, ...customDepartureFlights];
     }
 
-    if (currentView === 'departures' && position !== 'ALL') {
+    if (currentView === "departures" && position !== "ALL") {
       const allowedStatuses = getAllowedStatuses(position);
       baseFlights = baseFlights.filter((flight) =>
-        allowedStatuses.includes(flight.status || '')
+        allowedStatuses.includes(flight.status || ""),
       );
     }
 
@@ -883,7 +889,7 @@ export default function Flights() {
 
   const getBackgroundStyle = (opacity: number) => {
     if (opacity === 0) {
-      return { backgroundColor: 'transparent' };
+      return { backgroundColor: "transparent" };
     }
     const alpha = opacity / 100;
     return {
@@ -944,7 +950,7 @@ export default function Flights() {
 
   const handleFieldEditingStart = (
     flightId: string | number,
-    fieldName: string
+    fieldName: string,
   ) => {
     if (sessionUsersSocket?.emitFieldEditingStart) {
       sessionUsersSocket.emitFieldEditingStart(flightId, fieldName);
@@ -953,7 +959,7 @@ export default function Flights() {
 
   const handleFieldEditingStop = (
     flightId: string | number,
-    fieldName: string
+    fieldName: string,
   ) => {
     if (sessionUsersSocket?.emitFieldEditingStop) {
       sessionUsersSocket.emitFieldEditingStop(flightId, fieldName);
@@ -962,7 +968,7 @@ export default function Flights() {
 
   useEffect(() => {
     if (!session) return;
-    posthog?.group('session', session.sessionId, {
+    posthog?.group("session", session.sessionId, {
       airport_icao: session.airportIcao,
       is_pfatc: session.isPFATC,
       is_advanced_atc: Boolean(session.isAdvancedATC),
@@ -973,7 +979,7 @@ export default function Flights() {
   }, [session, posthog]);
 
   const handleJoyrideCallback = (data: CallBackProps) => {
-    trackTutorialEvent('flights', data);
+    trackTutorialEvent("flights", data);
     const { status } = data;
     if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
       updateTutorialStatus(true);
@@ -1000,24 +1006,25 @@ export default function Flights() {
         className="absolute inset-0 z-0"
         style={{
           backgroundImage,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          backgroundAttachment: 'fixed',
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          backgroundRepeat: "no-repeat",
+          backgroundAttachment: "fixed",
           opacity: 0.2,
-          pointerEvents: 'none',
+          pointerEvents: "none",
         }}
       />
       <div className="relative z-10">
         <Navbar sessionId={sessionId} accessId={accessId} />
         <div className="pt-16">
           <Toolbar
-            icao={session ? session.airportIcao : ''}
+            icao={session ? session.airportIcao : ""}
             sessionId={sessionId}
             accessId={accessId}
             activeRunway={session?.activeRunway}
             onRunwayChange={handleRunwayChange}
             isPFATC={session?.isPFATC ?? false}
+            isRadar={Boolean(session?.isRadar)}
             isAdvancedATC={session?.isAdvancedATC ?? false}
             currentView={currentView}
             onViewChange={handleViewChange}
@@ -1107,7 +1114,7 @@ export default function Flights() {
               </>
             ) : (
               <>
-                {currentView === 'departures' ? (
+                {currentView === "departures" ? (
                   <>
                     <DepartureTable
                       flights={filteredFlights}
@@ -1125,6 +1132,7 @@ export default function Flights() {
                       flashFlightId={null}
                       id="departure-table"
                       activeRunway={session?.activeRunway}
+                      showDepartureAirport={Boolean(session?.isRadar)}
                     />
                     <div className="flex justify-center mt-4 pb-6">
                       <Button
@@ -1212,7 +1220,7 @@ export default function Flights() {
         flights={activeAcarsFlightData}
         onSendContact={handleSendContact}
         activeAcarsFlights={activeAcarsFlights}
-        airportIcao={session?.airportIcao || ''}
+        airportIcao={session?.airportIcao || ""}
       />
       <ChartDrawer
         isOpen={showChartsDrawer}
@@ -1231,15 +1239,15 @@ export default function Flights() {
         tooltipComponent={CustomTooltip}
         styles={{
           options: {
-            primaryColor: '#3b82f6',
-            textColor: '#ffffff',
-            backgroundColor: '#1f2937',
+            primaryColor: "#3b82f6",
+            textColor: "#ffffff",
+            backgroundColor: "#1f2937",
             zIndex: 1000,
           },
           spotlight: {
-            border: '2px solid #fbbf24',
-            borderRadius: '24px',
-            boxShadow: '0 0 20px rgba(251, 191, 36, 0.5)',
+            border: "2px solid #fbbf24",
+            borderRadius: "24px",
+            boxShadow: "0 0 20px rgba(251, 191, 36, 0.5)",
           },
         }}
       />

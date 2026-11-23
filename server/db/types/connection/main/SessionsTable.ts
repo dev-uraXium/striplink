@@ -16,5 +16,7 @@ export interface SessionsTable {
   feedback_enabled?: boolean;
   external_session?: boolean | null;
   form_webhook_secret?: string | null;
+  /** StripLink: PF Radar session covering every airport */
+  is_radar?: boolean;
   google_form_id?: string | null;
 }

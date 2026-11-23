@@ -9,6 +9,7 @@ export interface SessionInfo {
   createdAt: string;
   createdBy: string;
   isPFATC: boolean;
+  isRadar?: boolean;
   isAdvancedATC?: boolean;
   feedbackEnabled?: boolean;
   activeRunway?: string;

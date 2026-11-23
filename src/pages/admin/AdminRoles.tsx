@@ -86,7 +86,7 @@ const PERMISSION_GROUPS: { title: string; keys: string[] }[] = [
     title: 'Content & access',
     keys: ['notifications', 'update_modals', 'roles'],
   },
-  { title: 'Network events', keys: ['pfatc_sector'] },
+  { title: 'Network events', keys: ['pfatc_sector', 'pf_radar'] },
 ];
 
 function groupPermissions() {

@@ -42,6 +42,7 @@ export async function createSession(data: {
   activeRunway?: string | null;
   arrivalRunway?: string | null;
   isTutorial?: boolean;
+  isRadar?: boolean;
 }): Promise<SessionInfo> {
   const res = await apiFetch(`${API_BASE_URL}/api/sessions/create`, {
     method: 'POST',

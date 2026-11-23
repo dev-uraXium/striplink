@@ -71,7 +71,23 @@ router.post(
         activeRunway = null,
         arrivalRunway = null,
         isTutorial = false,
+        isRadar = false,
       } = req.body;
+      // StripLink: PF Radar (whole-map) sessions need the pf_radar permission an admin grants
+      const radar = Boolean(isRadar);
+      if (radar && !isAdmin(createdBy)) {
+        const roles = await getUserRoles(createdBy);
+        const allowed = roles.some((r) => {
+          const p = typeof r.permissions === 'string' ? JSON.parse(r.permissions) : r.permissions;
+          return p?.pf_radar === true;
+        });
+        if (!allowed) {
+          return res.status(403).json({
+            error: 'Not allowed',
+            message: 'PF Radar sessions are only for controllers an admin has given PF Radar access.',
+          });
+        }
+      }
       if (!airportIcao) {
         return res.status(400).json({ error: 'Airport ICAO is required' });
       }
@@ -174,6 +190,7 @@ router.post(
         isPFATC: pfatc,
         isAdvancedATC: advancedAtc,
         isTutorial,
+        isRadar: radar,
       });
 
       await addSessionToUser(createdBy, sessionId);
@@ -261,6 +278,7 @@ router.get('/mine', requireAuth, async (req, res) => {
       createdBy: session.created_by,
       isPFATC: session.is_pfatc,
       isAdvancedATC: session.is_advanced_atc,
+      isRadar: Boolean(session.is_radar),
       activeRunway: session.active_runway,
       customName: session.custom_name,
       flightCount: flightCountMap.get(session.session_id) ?? 0,
@@ -335,6 +353,7 @@ router.get('/:sessionId', requireSessionAccess, async (req, res) => {
       createdBy: session.created_by,
       isPFATC: session.is_pfatc,
       isAdvancedATC: session.is_advanced_atc,
+      isRadar: Boolean(session.is_radar),
       feedbackEnabled: session.feedback_enabled ?? true,
       atis,
     });
@@ -405,6 +424,7 @@ router.put('/:sessionId', requireSessionAccess, async (req, res) => {
       createdBy: session.created_by,
       isPFATC: session.is_pfatc,
       isAdvancedATC: session.is_advanced_atc,
+      isRadar: Boolean(session.is_radar),
       feedbackEnabled: session.feedback_enabled ?? true,
       atis: decryptedAtis,
     });
@@ -565,6 +585,7 @@ router.get('/', async (_req, res) => {
         createdBy: session.created_by,
         isPFATC: session.is_pfatc,
         isAdvancedATC: session.is_advanced_atc,
+        isRadar: Boolean(session.is_radar),
         activeRunway: session.active_runway,
       }))
     );
