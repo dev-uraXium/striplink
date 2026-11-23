@@ -154,7 +154,7 @@ function setupStripLinkForm() {
   const form = FormApp.getActiveForm();
   if (form.getItems().length === 0) {
     form.setTitle('StripLink flight plan');
-    form.setDescription('File your flight plan. It goes straight onto your controller\\'s StripLink board.');
+    form.setDescription(formDescription_());
     form.addTextItem().setTitle(SESSION_QUESTION)
       .setHelpText('Filled in by your controller\\'s link. Don\\'t change it.').setRequired(true);
     form.addTextItem().setTitle('Roblox username').setRequired(true);
@@ -177,6 +177,20 @@ function setupStripLinkForm() {
   ScriptApp.newTrigger('onFormSubmit').forForm(form).onFormSubmit().create();
 
   registerWithStripLink();
+}
+
+/** Form intro: what it is, plus the PFTracker shortcut (the form is the only link pilots get). */
+function formDescription_() {
+  const site = STRIPLINK_URL.replace(/\\/api\\/.*$/, '');
+  return 'File your flight plan. It goes straight onto your controller\\'s StripLink board.\\n\\n' +
+    'Already filed on PFTracker? Get the one-click "Send to StripLink" button at ' + site + '/pftracker ' +
+    'and it fills this form in for you.';
+}
+
+/** Updates the intro text on an existing form. */
+function updateFormDescription() {
+  FormApp.getActiveForm().setDescription(formDescription_());
+  console.log('Form description updated.');
 }
 
 /** Every question's entry ID (and choices), so StripLink can pre-fill the whole form. */
