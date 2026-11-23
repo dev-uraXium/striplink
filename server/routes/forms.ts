@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 // StripLink: Google Forms intake.
 //   POST /api/forms/webhook/:sessionId        <- called by the form's Apps Script
 //   GET/POST /api/forms/session/:sessionId/*  <- session owner manages it from the board
@@ -304,6 +305,53 @@ router.get('/prefill/:sessionId', async (req, res) => {
   });
   res.setHeader('Cache-Control', 'no-store');
   res.redirect(302, link);
+});
+
+// POST: /api/forms/pilot-panel - a pilot who filed through the form finds their ACARS panel
+// (squawk, PDC) by callsign + Roblox username. Recent form flights only.
+const pilotPanelLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Too many tries. Wait a minute.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post('/pilot-panel', pilotPanelLimiter, async (req, res) => {
+  const callsign =
+    typeof req.body?.callsign === 'string'
+      ? req.body.callsign.trim().toUpperCase().replace(/\s+/g, '')
+      : '';
+  const roblox =
+    typeof req.body?.roblox === 'string' ? req.body.roblox.trim() : '';
+  if (
+    !/^[A-Z0-9-]{2,16}$/.test(callsign) ||
+    !/^[A-Za-z0-9_]{3,20}$/.test(roblox)
+  ) {
+    return res
+      .status(400)
+      .json({
+        error: 'Enter the callsign and Roblox username you filed with.',
+      });
+  }
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['id', 'session_id', 'acars_token'])
+    .where('callsign', '=', callsign)
+    .where(sql<boolean>`lower(roblox_username) = ${roblox.toLowerCase()}`)
+    .where('submitted_via', '=', 'form')
+    .where('created_at', '>', sql<Date>`now() - interval '6 hours'`)
+    .orderBy('created_at', 'desc')
+    .executeTakeFirst();
+  if (!flight?.acars_token) {
+    return res.status(404).json({
+      error:
+        'No flight plan found for that callsign and Roblox username in the last 6 hours. Check both match what you put in the form.',
+    });
+  }
+  res.json({
+    path: `/acars/${flight.session_id}/${flight.id}?acars_token=${flight.acars_token}`,
+  });
 });
 
 // ---------- owner settings ----------

@@ -174,6 +174,7 @@ function setupStripLinkForm() {
     form.addParagraphTextItem().setTitle('Remarks');
   }
   form.setCollectEmail(false);
+  form.setConfirmationMessage(confirmationMessage_());
   form.setAllowResponseEdits(false);
 
   ScriptApp.getProjectTriggers()
@@ -192,10 +193,18 @@ function formDescription_() {
     'and it fills this form in for you.';
 }
 
+/** Shown after a pilot submits: where to get their squawk and PDC. */
+function confirmationMessage_() {
+  const site = STRIPLINK_URL.replace(/\\/api\\/.*$/, '');
+  return 'Flight plan sent to your controller.\\n\\nOpen your pilot panel for your squawk, PDC and controller messages: ' +
+    site + '/pilot (use the same callsign and Roblox username).';
+}
+
 /** Updates the intro text on an existing form, and lets the session answer be empty (PF Radar). */
 function updateFormDescription() {
   const form = FormApp.getActiveForm();
   form.setDescription(formDescription_());
+  form.setConfirmationMessage(confirmationMessage_());
   form.getItems(FormApp.ItemType.TEXT).forEach(function (i) {
     if (i.getTitle() === SESSION_QUESTION) i.asTextItem().setRequired(false).setHelpText(SESSION_HELP);
   });

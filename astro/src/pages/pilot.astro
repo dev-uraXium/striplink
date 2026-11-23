@@ -1,0 +1,15 @@
+---
+import { SPA_SITE_URL } from '../lib/spaSeo';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PilotPanelContent from '@app/islands/PilotPanelContent';
+
+const PAGE_URL = `${SPA_SITE_URL}/pilot`;
+---
+
+<BaseLayout
+  title="Pilot panel — StripLink"
+  description="Open your StripLink pilot panel: squawk, PDC and controller messages for the flight plan you filed."
+  canonicalUrl={PAGE_URL}
+>
+  <PilotPanelContent pathname={Astro.url.pathname} client:load />
+</BaseLayout>

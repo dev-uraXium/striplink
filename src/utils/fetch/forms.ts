@@ -135,3 +135,22 @@ export async function fetchPilotFormLink(
     return null;
   }
 }
+
+/** Public: a form-filed flight's ACARS path, found by callsign + Roblox username. */
+export async function findPilotPanel(
+  callsign: string,
+  roblox: string
+): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/api/forms/pilot-panel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callsign, roblox }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    path?: string;
+    error?: string;
+  };
+  if (!res.ok || !data.path)
+    throw new Error(data.error ?? 'Could not find your flight');
+  return data.path;
+}

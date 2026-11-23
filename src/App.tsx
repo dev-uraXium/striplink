@@ -87,6 +87,7 @@ const HowToUsePFControl = lazy(() => import('./pages/HowToUsePFControl'));
 const Glossary = lazy(() => import('./pages/Glossary'));
 const Legal = lazy(() => import('./pages/Legal'));
 const PfTrackerSync = lazy(() => import('./pages/PfTrackerSync'));
+const PilotPanel = lazy(() => import('./pages/PilotPanel'));
 const DeveloperDocsPage = lazy(() => import('./pages/DeveloperDocsPage'));
 
 const Admin = lazy(() => import('./pages/Admin'));
@@ -164,6 +165,7 @@ export default function App() {
             <Route path="/howtousepfcontrol" element={<HowToUsePFControl />} />
             <Route path="/glossary" element={<Glossary />} />
             <Route path="/pftracker" element={<PfTrackerSync />} />
+            <Route path="/pilot" element={<PilotPanel />} />
             <Route path="/terms" element={<Legal doc="terms" />} />
             <Route path="/privacy" element={<Legal doc="privacy" />} />
             <Route path="/cookies" element={<Legal doc="cookies" />} />
