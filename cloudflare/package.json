@@ -4,5 +4,8 @@
   "scripts": {
     "build": "echo 'no build step'",
     "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.166.0"
   }
 }
