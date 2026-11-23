@@ -82,7 +82,7 @@ browser ──► Cloudflare Worker (cloudflare/worker.js) ──► Render web 
    - `PROXY_SECRET` = any long random string (also goes on the Worker)
    - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` = `<FRONTEND_URL>/api/auth/discord/callback` (add the same URL in the Discord developer portal → OAuth2 → Redirects)
    - `ADMIN_IDS` = your Discord user id
-3. **Cloudflare** → Workers & Pages → *Create → Import a repository* → this repo, root directory `cloudflare`. Then on the Worker → Settings: variable `ORIGIN` = your Render URL, secret `PROXY_SECRET` = same as on Render. `wrangler.toml` adds a 10-minute cron that keeps Render awake.
+3. **Cloudflare** → Workers & Pages → *Create → Import a repository* → this repo, root directory `cloudflare`. Then on the Worker → Settings: variable `ORIGIN` = your Render URL, secret `PROXY_SECRET` = same as on Render. `wrangler.jsonc` adds a 10-minute cron that keeps Render awake.
 4. If your Worker URL differs, change `VITE_SERVER_URL` / `PUBLIC_SITE_URL` in `.env.vite.production` and push (the frontend bakes it in at build time).
 
 The keep-alive cron uses ~730 of Render's 750 free instance hours a month, so run only one free Render service. Neon scales to zero when idle and wakes in under a second.

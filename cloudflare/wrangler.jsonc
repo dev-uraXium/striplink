@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "striplink",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "vars": {
+    "ORIGIN": "https://striplink.onrender.com"
+  },
+  "triggers": {
+    "crons": ["*/10 * * * *"]
+  },
+  "observability": { "enabled": true }
+}
