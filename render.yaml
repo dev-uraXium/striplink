@@ -10,6 +10,11 @@ services:
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     autoDeploy: true
+    buildFilter:
+      ignoredPaths:
+        - cloudflare/**
+        - README.md
+        - "*.md"
     envVars:
       - key: NODE_ENV
         value: production

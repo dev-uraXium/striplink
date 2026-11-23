@@ -1,0 +1,8 @@
+{
+  "name": "striplink-worker",
+  "private": true,
+  "scripts": {
+    "build": "echo 'no build step'",
+    "deploy": "wrangler deploy"
+  }
+}
