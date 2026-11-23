@@ -47,12 +47,27 @@ export function runwayForWind(runways: string[], metar: string): string {
   return best;
 }
 
+// Small fields with no METAR of their own borrow the nearest reporting station's weather.
+const NEAREST_METAR: Record<string, string> = {
+  EGHJ: 'EGHI', // Bembridge, Isle of Wight -> Southampton
+  X2BH: 'EGHQ', // Bolt Head -> Newquay
+  MTCA: 'MTPP', // Les Cayes -> Port-au-Prince
+};
+
+async function metarFor(icao: string): Promise<string | null> {
+  for (const station of [icao, NEAREST_METAR[icao]].filter(Boolean) as string[]) {
+    const result = await resolveAviationMetar(station);
+    const raw = result.ok ? result.body.rawOb : undefined;
+    if (typeof raw === 'string' && raw.trim()) return raw;
+  }
+  return null;
+}
+
 async function oneAirport(airport: AirportRow, ident: string): Promise<RadarAirportAtis> {
   const name = airport.controlName || airport.name || airport.icao;
   try {
-    const result = await resolveAviationMetar(airport.icao);
-    const metar = result.ok ? result.body.rawOb : undefined;
-    if (typeof metar !== 'string' || !metar.trim()) {
+    const metar = await metarFor(airport.icao);
+    if (!metar) {
       return { icao: airport.icao, name, runway: null, text: null, error: 'No METAR available' };
     }
     const runway = runwayForWind(airport.runways!, metar);
