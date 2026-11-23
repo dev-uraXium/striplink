@@ -27,7 +27,11 @@ services:
       - key: CHART_SUBJECT_SECRET
         generateValue: true
       # Fill these in on the Render dashboard when the Blueprint asks:
-      - key: FRONTEND_URL          # e.g. https://striplink.onrender.com
+      - key: FRONTEND_URL          # the public URL (the Cloudflare Worker), e.g. https://striplink.<you>.workers.dev
+        sync: false
+      - key: PUBLIC_API_URL        # same as FRONTEND_URL (used for the Google Forms webhook URL)
+        sync: false
+      - key: PROXY_SECRET          # same value as the Worker's PROXY_SECRET
         sync: false
       - key: POSTGRES_DB_URL       # Supabase → Connect → Session pooler URI
         sync: false

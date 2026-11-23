@@ -35,6 +35,7 @@ import { getSocketUser } from './socketAuth.js';
 import { getNetworkKind } from '../utils/advancedNetworkSession.js';
 import { resolveExternalAcarsRedirectUrl } from '../utils/externalAcarsPanel.js';
 import { allowedOrigins } from '../utils/allowedOrigins.js';
+import { proxyClientIp } from '../utils/proxyClientIp.js';
 
 interface FlightUpdateData {
   flightId: string | number;
@@ -67,6 +68,9 @@ interface SessionUpdateData {
 let io: SocketIOServer;
 
 function getSocketClientIp(socket: Socket): string {
+  const proxied = proxyClientIp(socket.handshake.headers);
+  if (proxied) return proxied;
+
   if (socket.handshake.headers['cf-connecting-ip']) {
     const cfIp = socket.handshake.headers['cf-connecting-ip'];
     return Array.isArray(cfIp) ? cfIp[0] : cfIp;

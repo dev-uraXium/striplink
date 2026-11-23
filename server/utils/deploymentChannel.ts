@@ -30,6 +30,6 @@ export function resolveChannelFromHostname(host: string): string {
 
 export function resolveChannelFromHost(req: Request): string {
   return resolveChannelFromHostname(
-    req.get('host') || req.get('x-forwarded-host') || ''
+    req.get('x-forwarded-host') || req.get('host') || ''
   );
 }

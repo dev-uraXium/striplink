@@ -1,4 +1,5 @@
 import type { IncomingMessage } from 'http';
+import { proxyClientIp } from '../utils/proxyClientIp.js';
 
 interface HandshakeBucket {
   count: number;
@@ -18,6 +19,9 @@ const bucketsByScope = new Map<string, Map<string, HandshakeBucket>>();
 const cleanupTimersByScope = new Map<string, NodeJS.Timeout>();
 
 function getRequestIp(req: IncomingMessage): string {
+  const proxied = proxyClientIp(req.headers);
+  if (proxied) return proxied;
+
   const cfIp = req.headers['cf-connecting-ip'];
   if (typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim();
 

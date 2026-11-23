@@ -855,7 +855,7 @@ router.get('/ranks/:userId', async (req, res) => {
 // GET: /api/data/tester-settings - get tester gate settings
 router.get('/tester-settings', async (req, res) => {
   try {
-    const host = req.get('host') || req.get('x-forwarded-host') || '';
+    const host = req.get('x-forwarded-host') || req.get('host') || '';
 
     if (isProductionHost(host)) {
       applyPublicCache(res, {

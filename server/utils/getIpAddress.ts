@@ -1,8 +1,12 @@
 import { Request } from 'express';
+import { proxyClientIp } from './proxyClientIp.js';
 
 const TRUST_PROXY = process.env.TRUST_PROXY_HEADERS === 'true';
 
 export function getClientIp(req: Request): string {
+  const proxied = proxyClientIp(req.headers);
+  if (proxied) return proxied;
+
   if (TRUST_PROXY) {
     const cfIp = req.headers['cf-connecting-ip'];
     if (cfIp) {
