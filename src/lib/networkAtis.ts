@@ -84,7 +84,9 @@ export function buildNetworkAtis(input: NetworkAtisInput): string {
   const icao = input.icao.trim().toUpperCase();
   const stem = (
     input.controlName || networkAirportName(input.airportName, icao)
-  ).trim();
+  )
+    .trim()
+    .replace(/\s+(center|centre|control)$/i, ''); // the suffix below adds "Control"
   const stemTitle = stem
     .toLowerCase()
     .replace(/\b\p{L}/gu, (c) => c.toUpperCase());

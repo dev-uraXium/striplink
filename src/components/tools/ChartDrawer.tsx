@@ -461,7 +461,9 @@ export default function ChartDrawer({
   const pickerAirports = useMemo(
     () =>
       airportData
-        .filter((airport) => !airport.controlName?.includes('Center'))
+        .filter(
+          (airport) => !/\b(center|control)\b/i.test(airport.controlName ?? '')
+        )
         .map((airport) => ({
           icao: airport.icao,
           name: airport.name,

@@ -41,7 +41,7 @@ export default function AirportCombobox({
   const options = useMemo(
     () =>
       (Array.isArray(airports) ? airports : []).filter(
-        (airport) => !airport.controlName?.includes('Center')
+        (airport) => !/\b(center|control)\b/i.test(airport.controlName ?? '')
       ),
     [airports]
   );

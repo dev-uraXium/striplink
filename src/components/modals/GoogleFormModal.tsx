@@ -94,7 +94,10 @@ export default function GoogleFormModal({
 
   // Session airport first so sendTestFlight departs from here
   const airportList = useMemo(() => {
-    const list = airports.map((a) => `${a.icao} - ${a.name}`);
+    const list = airports
+      // Only real airports: the London/Nicosia/Santo Domingo Control areas can't be filed to
+      .filter((a) => !/\b(center|control)\b/i.test(a.controlName ?? ''))
+      .map((a) => `${a.icao} - ${a.name}`);
     const own = list.find((a) => a.startsWith(`${airportIcao} `));
     return own ? [own, ...list.filter((a) => a !== own)] : list;
   }, [airports, airportIcao]);

@@ -36,7 +36,7 @@ export default function AirportDropdown({
 
     if (excludeCenterPositions) {
       filteredAirports = airports.filter(
-        (airport) => !airport.controlName?.includes('Center')
+        (airport) => !/\b(center|control)\b/i.test(airport.controlName ?? '')
       );
     }
 
