@@ -29,10 +29,10 @@ export const BOOKMARKLET_SOURCE = `(async () => {
     alert('No active PFTracker flight plan found. File one on PFTracker first.');
     return;
   }
-  const pasted = prompt('Paste your controller\\'s StripLink link (or the session ID):', localStorage.getItem('striplinkSession') || '');
+  const pasted = prompt('Paste the flight plan link your controller posted (the StripLink / Google Form link):', localStorage.getItem('striplinkSession') || '');
   if (!pasted) return;
   const ids = pasted.match(/\\b[0-9a-f]{8}\\b/gi);
-  if (!ids) { alert('That doesn\\'t contain a StripLink session ID.'); return; }
+  if (!ids) { alert('That link doesn\\'t contain a StripLink session. Copy the flight plan link your controller posted.'); return; }
   const session = ids[ids.length - 1].toLowerCase();
   localStorage.setItem('striplinkSession', session);
   const d = plan.departureInfo || {}, s = plan.selections || {}, a = plan.aircraftInfo || {};

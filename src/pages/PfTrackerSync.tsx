@@ -87,8 +87,8 @@ export default function PfTrackerSync() {
           <li className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
             <h2 className="mb-2 font-bold">3. Click Send to StripLink</h2>
             <p className="text-sm text-zinc-400">
-              While you&apos;re on PFTracker, click the bookmark and paste your controller&apos;s StripLink link (or
-              the session ID). Your StripLink form opens with your callsign, airports, route and level filled in.
+              While you&apos;re on PFTracker, click the bookmark and paste the flight plan link your controller
+              posted (the same link you&apos;d use to file normally). Your StripLink form opens with your callsign, airports, route and level filled in.
               Check it, add your aircraft if it&apos;s missing, and press Submit.
             </p>
           </li>
