@@ -8,8 +8,8 @@ const SECTIONS = [
   { id: 'getting-started', label: 'Getting Started' },
   { id: 'creating-a-session', label: 'Creating a Session' },
   { id: 'flight-strips', label: 'Managing Flight Strips' },
-  { id: 'submitting-a-flight-plan', label: 'Submitting a Flight Plan' },
-  { id: 'acars-and-pdc', label: 'ACARS & Requesting PDC' },
+  { id: 'submitting-a-flight-plan', label: 'Filing a Flight Plan' },
+  { id: 'acars-and-pdc', label: 'Pilot Panel, ACARS & PDC' },
   { id: 'charts', label: 'Charts & Airport Diagrams' },
   { id: 'network-overview', label: 'The Network Overview' },
   { id: 'public-profiles', label: 'Public Profiles' },
@@ -17,38 +17,6 @@ const SECTIONS = [
   { id: 'settings', label: 'Settings & Personalization' },
   { id: 'faq', label: 'FAQ' },
 ];
-
-function GuideImage({
-  src,
-  alt,
-  caption,
-}: {
-  src: string;
-  alt: string;
-  caption: string;
-}) {
-  const [failed, setFailed] = useState(false);
-  return (
-    <figure className="my-8">
-      {failed ? (
-        <div className="aspect-video flex items-center justify-center rounded-xl border-2 border-dashed border-zinc-700 bg-zinc-900 text-zinc-500 text-sm">
-          <span>Screenshot: {caption}</span>
-        </div>
-      ) : (
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          className="w-full aspect-video object-cover rounded-xl border border-zinc-700"
-          onError={() => setFailed(true)}
-        />
-      )}
-      <figcaption className="mt-2 text-xs text-zinc-500 text-center">
-        {caption}
-      </figcaption>
-    </figure>
-  );
-}
 
 function SidebarNav({
   className = '',
@@ -158,96 +126,77 @@ export default function HowToUsePFControl() {
             <section id="what-is-pfcontrol">
               <h2>What is StripLink?</h2>
               <p>
-                StripLink is a browser-based air traffic control platform built
-                specifically for Project Flight. Instead of coordinating
-                departures and arrivals over voice chat with no record of what
-                was cleared, controllers get a live, shared flight strip board
-                that every controller in the session can see update in real time
-                — clearances, runway assignments, squawk codes, route changes,
-                and status all sync across everyone connected.
+                StripLink is a live flight strip board for Project Flight. It's
+                a fork of{' '}
+                <a
+                  href="https://github.com/cephie-studios/pfcontrol-2"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  PFControl
+                </a>{' '}
+                by Cephie Studios, so the board itself works the same way: every
+                controller in a session sees clearances, runways, squawks and
+                statuses update in real time.
               </p>
               <p>
-                The platform is built around two roles that often overlap:{' '}
-                <strong>controllers</strong>, who create sessions and manage the
-                flight strip board for an airport, and <strong>pilots</strong>,
-                who submit flight plans into a session and receive clearances
-                back through the ACARS terminal. Everything is free and does not
-                require an account to submit a flight plan as a pilot, though
-                signing in unlocks saved flight history, a profile, and access
-                to ACARS.
+                What StripLink adds is <strong>Google Form intake</strong>.
+                Pilots file through a normal Google Form, and each response
+                lands on the controller's board as a strip with the squawk,
+                runway and SID already filled in. On top of that there's
+                network-format ATIS for Discord, PF Radar for covering the whole
+                map, and openCharts charts on the board.
               </p>
-              <GuideImage
-                src="/assets/guide/overview.webp"
-                alt="The StripLink homepage showing the hero section, live leaderboard, and community statistics"
-                caption="The StripLink homepage; session tools, live leaderboard, and community stats."
-              />
             </section>
 
             <section id="getting-started">
               <h2>Getting Started</h2>
               <p>
-                Open <a href="/">StripLink</a> and click{' '}
-                <a href="/login">Sign In with Discord</a> in the top navigation
-                bar. StripLink uses Discord OAuth for authentication that way
-                there's no separate password to create or remember. Once you
-                authorize the app, you're taken back to StripLink already signed
-                in, with your Discord username attached to your account.
+                Controllers sign in with <a href="/login">Discord</a> from the
+                top navigation bar. There's no separate password to create.
               </p>
               <p>
-                You don't need an account to submit a flight plan as a pilot; a
-                guest can submit to any session without signing in first.
-                Signing in unlocks a few things that guests don't get: your
-                submitted flights are saved to{' '}
-                <a href="/my-flights">My Flights</a> so you can look back at
-                past legs, you get a profile page other pilots and controllers
-                can view, and you're able to open the ACARS terminal to receive
-                pre-departure clearances and messages from controllers directly.
-                If you submit a flight plan as a guest and later decide you want
-                it saved, StripLink will offer to attach that flight to your
-                account the moment you sign in.
+                Pilots don't need an account at all. They file through the
+                Google Form their controller posts, and can check their
+                clearance on the <a href="/pilot">pilot panel</a> afterwards.
+                Signing in is only needed if a pilot wants their flights saved
+                to <a href="/my-flights">My Flights</a> or a public profile.
               </p>
             </section>
 
             <section id="creating-a-session">
               <h2>Creating a Session</h2>
               <p>
-                Controllers start from <a href="/create">Create Session</a> in
-                the navigation bar. The form asks for an airport by ICAO code, a
-                departure runway, and arrival runway. If you leave the arrival
-                runway blank, it defaults to match the departure runway.
+                Start from <a href="/create">Create Session</a>. Pick the
+                airport by ICAO code, a departure runway and an arrival runway
+                (left blank, it matches the departure runway). You land straight
+                on the flight strip board, ready for flight plans.
               </p>
               <p>
-                Below the runway selection is a <strong>PFATC Network</strong>{' '}
-                checkbox. Leaving it unchecked creates a{' '}
-                <strong>Standard</strong> session (a private flight strip board
-                just for you and anyone you share the session link with.)
-                Checking it creates a <strong>PFATC</strong> session instead:
-                every flight submitted becomes publicly visible on the{' '}
-                <a href="/overview">Network Overview</a> page, departures from
-                your session will be shared with other PFATC sessions, creating
-                arrivals. PFATC sessions are the right choice for controllers
-                who are controlling on the PFATC network.
+                <strong>PF Radar</strong> is a special session for one
+                controller covering every airport on the map. Strips from any
+                airport land on the same board, tagged with their departure
+                airport. Only StripLink admins can grant access to it.
+              </p>
+              <h3>Posting your ATIS</h3>
+              <p>
+                The ATIS panel builds the post in network format: airport name,
+                position lines with each controller's Discord mention, and the
+                ATIS in a code block, ready to paste with{' '}
+                <strong>Copy for Discord</strong>. PF Radar sessions get one
+                post with the ATIS for every airport, sized to fit a single
+                Discord message.
               </p>
               <p>
-                After creating a PFATC session, StripLink can prompt you with an
-                auto-generated ATIS based on the airport and runway you
-                selected, the atis is formatted for the PFATC ATIS channel and
-                can be directly copied and pasted. Once the session is created,
-                you land directly on the flight strip board for that airport,
-                ready to receive flight plans.
+                <strong>PFATC mode</strong> is on by default and keeps the post
+                to the PFTracker filing link only, since PFATC doesn't allow
+                Google Form or StripLink links. Turn it off in your own servers
+                to post the Google Form link as well.
               </p>
-              <GuideImage
-                src="/assets/guide/create-session.webp"
-                alt="The Create Session form with an airport ICAO search field, runway selectors, and the PFATC Network checkbox"
-                caption="Creating a new session — pick an airport, runways, and whether it's a PFATC session."
-              />
               <p>
                 Every session you create shows up under{' '}
-                <a href="/sessions">My Sessions</a>, listed as a card with the
-                airport, creation date, departure runway, current flight count,
-                and a color-coded badge — green for Standard, blue for PFATC.
-                From there you can rename a session, jump back into it, or
-                delete it once you're done.
+                <a href="/sessions">My Sessions</a>, where you can rename it,
+                jump back in, or delete it when you're done.
               </p>
             </section>
 
@@ -310,73 +259,46 @@ export default function HowToUsePFControl() {
                 airport (ADEP), gate, and STAR, with a status flow of{' '}
                 <strong>APP &rarr; RWY &rarr; TAXI &rarr; GATE</strong>.
               </p>
-              <GuideImage
-                src="/assets/guide/flight-strips.webp"
-                alt="The departures flight strip table showing callsign, aircraft, runway, squawk, and status columns for several active flights"
-                caption="The departures table during an active session — every field updates live for all controllers."
-              />
             </section>
 
             <section id="submitting-a-flight-plan">
-              <h2>Submitting a Flight Plan</h2>
+              <h2>Filing a Flight Plan</h2>
               <p>
-                Pilots submit into a specific session using that session's
-                submit link. The form asks for a callsign (must include a
-                number), aircraft type from a searchable list, flight type (IFR
-                or VFR), an optional stand, the arrival airport, a cruising
-                flight level, and an optional route and remarks field. The
-                departure airport is locked to whatever airport the session is
-                for.
+                Pilots file through the Google Form link their controller posts.
+                The form asks for the callsign, aircraft, departure and arrival
+                airports, cruising level, route and remarks, plus their Roblox
+                username. Submitting it puts the flight on the controller's
+                board with a <strong>PENDING</strong> status a few seconds
+                later.
               </p>
               <p>
-                If you leave the route blank, a <strong>Generate</strong> button
-                will build one for you automatically — picking a SID, STAR, and
-                cruising altitude that respects altitude rules.
+                Already filed on PFTracker? The{' '}
+                <a href="/pftracker">Send to StripLink</a> button copies that
+                plan into the form so there's nothing to type twice. It's
+                optional and only runs when the pilot clicks it.
               </p>
               <p>
-                Submitting doesn't require an account. Once you submit, the
-                flight appears on the controller's strip board with a{' '}
-                <strong>PENDING</strong> status. If you're not signed in,
-                StripLink will offer to create an account and attach the flight
-                to it (if you want it to show up later in{' '}
-                <a href="/my-flights">My Flights</a>.) For PFATC sessions, after
-                submitting you'll see a prompt to open ACARS, where you can
-                request your clearance directly. Opening ACARS does require
-                being signed in, since clearances and messages are tied to your
-                account.
+                Where only PFTracker links are allowed (like PFATC), controllers
+                add strips by hand from the board instead.
               </p>
             </section>
 
             <section id="acars-and-pdc">
-              <h2>ACARS &amp; Requesting PDC</h2>
+              <h2>Pilot Panel, ACARS &amp; PDC</h2>
               <p>
-                ACARS is StripLink's messaging terminal. Once you've submitted a
-                flight plan and signed in, you can open your flight's ACARS
-                terminal to see a log of everything relevant to your flight:
-                your submitted flight plan details, clearances, and any messages
-                a controller sends you.
+                After filing, the form's confirmation page links to the{' '}
+                <a href="/pilot">pilot panel</a>. Enter your callsign and Roblox
+                username and it opens your flight's ACARS terminal: your flight
+                plan, squawk, clearances and any messages a controller sends
+                you.
               </p>
               <p>
-                The most common thing pilots use ACARS for is requesting a{' '}
-                <strong>pre-departure clearance (PDC)</strong>. Press{' '}
-                <strong>Request PDC</strong> and the request is sent to the
-                controller working that airport, with a system message logged
-                confirming it was sent. Once a controller issues your clearance,
-                it appears in your ACARS log.
-              </p>
-              <GuideImage
-                src="/assets/guide/acars-terminal.webp"
-                alt="The ACARS terminal showing a flight plan submission message, a PDC request confirmation, and an issued clearance from the controller"
-                caption="An ACARS terminal after requesting and receiving a pre-departure clearance."
-              />
-              <p>
-                Controllers can also send a pilot a direct{' '}
-                <strong>contact me</strong> message through ACARS — for example
-                asking them to switch to a specific frequency — which shows up
-                in the pilot's terminal the same way. The ACARS panel sits
-                alongside notes and airport charts, so a pilot can reference
-                their clearance, take notes, and pull up the relevant SID chart
-                all from the same screen while taxiing out.
+                Press <strong>Request PDC</strong> to ask the controller for a
+                pre-departure clearance. Once they issue it, it shows up in your
+                ACARS log. Controllers can also send a{' '}
+                <strong>contact me</strong> message, for example asking you to
+                switch frequency. The ACARS panel sits next to notes and airport
+                charts, so you can check your SID while taxiing out.
               </p>
             </section>
 
@@ -417,8 +339,7 @@ export default function HowToUsePFControl() {
               <p>
                 Every signed-in user gets a public profile page at{' '}
                 <code>/user/&lt;username&gt;</code>, showing role badges, a bio,
-                controlling and flying statistics, and up to a few featured
-                flights they've chosen to highlight. Profile owners can
+                and controlling and flying statistics. Profile owners can
                 customize their own page directly from the profile page.
               </p>
             </section>
@@ -453,9 +374,9 @@ export default function HowToUsePFControl() {
 
               <h3>Do I need an account to use StripLink?</h3>
               <p>
-                Not to submit a flight plan as a pilot — guests can submit
-                flight plans to any open session. You do need an account to
-                create sessions as a controller, open ACARS, or get a profile.
+                Not as a pilot: you file through the Google Form and use the
+                pilot panel without signing in. You do need a Discord account to
+                create sessions as a controller or to get a profile.
               </p>
 
               <h3>
@@ -470,18 +391,17 @@ export default function HowToUsePFControl() {
 
               <h3>How do I get a pre-departure clearance?</h3>
               <p>
-                Submit your flight plan, sign in if you haven't already, open
-                ACARS from the prompt shown after submitting, and press Request
-                PDC. The controller working that airport will see your request
-                and can issue your clearance directly back into your ACARS
-                terminal.
+                File through the Google Form, open the pilot panel from the
+                confirmation page, enter your callsign and Roblox username, and
+                press Request PDC. The controller will see your request and can
+                issue your clearance straight back into your ACARS terminal.
               </p>
 
               <h3>Is StripLink affiliated with Project Flight?</h3>
               <p>
-                StripLink is an independent platform based on PFControl by
-                Cephie Studios, and is not affiliated with Project Flight. It's
-                built to work alongside Project Flight.
+                No. StripLink is a fork of PFControl by Cephie Studios, run by{' '}
+                {BRAND.owner || 'its operator'}. It isn't affiliated with
+                PFControl, Cephie Studios, Project Flight or PFATC.
               </p>
 
               <h3>Is StripLink free?</h3>
