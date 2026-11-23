@@ -1,3 +1,4 @@
+import { usePfatcMode } from '../../hooks/usePfatcMode';
 import { useEffect, useState, useMemo } from 'react';
 import { Loader, Info, RefreshCw, Copy, MessageSquare } from 'lucide-react';
 import { buildNetworkAtis } from '../../lib/networkAtis';
@@ -56,6 +57,7 @@ export default function ATIS({
   const [networkCopied, setNetworkCopied] = useState(false);
   const [formLink, setFormLink] = useState<string | null>(null);
   const [includeLinks, setIncludeLinks] = useState(true);
+  const [pfatcMode, setPfatcMode] = usePfatcMode();
   useEffect(() => {
     if (!open || !sessionId) return;
     let cancelled = false;
@@ -431,11 +433,11 @@ export default function ATIS({
               position: u.position,
             })),
             atisText,
-            formLink: includeLinks ? formLink : null,
+            formLink: includeLinks && !pfatcMode ? formLink : null,
             includePfTracker: includeLinks,
           })
         : '',
-    [atisText, airport, icao, sessionUsers, includeLinks, formLink]
+    [atisText, airport, icao, sessionUsers, includeLinks, formLink, pfatcMode]
   );
 
   const copyNetworkAtis = async () => {
@@ -533,8 +535,15 @@ export default function ATIS({
                 checked={includeLinks}
                 onCheckedChange={(checked) => setIncludeLinks(checked === true)}
               />
-              Add flight plan filing links (Google Form
-              {formLink ? '' : ' when set up'} and PFTracker)
+              Add flight plan filing links
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <Checkbox
+                checked={pfatcMode}
+                onCheckedChange={(checked) => setPfatcMode(checked === true)}
+              />
+              PFATC mode: PFTracker link only (PFATC doesn't allow form or
+              StripLink links)
             </label>
             <p className="mt-2 text-xs text-zinc-500">
               Positions come from what each controller picked on the board. Pick

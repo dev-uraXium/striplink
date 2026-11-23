@@ -121,7 +121,11 @@ export function buildNetworkAtis(input: NetworkAtisInput): string {
   const filing: string[] = [];
   if (input.formLink) filing.push(`FILE YOUR FLIGHT PLAN: <${input.formLink}>`);
   if (input.includePfTracker)
-    filing.push(`OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`);
+    filing.push(
+      input.formLink
+        ? `OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`
+        : `FILE YOUR FLIGHT PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`
+    );
   return [
     header,
     '',

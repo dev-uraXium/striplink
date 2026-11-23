@@ -1,4 +1,5 @@
 // StripLink PF Radar: generate one ATIS per airport and the network post for all of them.
+import { usePfatcMode } from '../../hooks/usePfatcMode';
 import { useEffect, useMemo, useState } from 'react';
 import { Copy, Loader, MessageSquare, Radar } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
@@ -58,6 +59,7 @@ export default function RadarATIS({
   }>({ url: null, shortUrl: null });
   const [style, setStyle] = useState<RadarAtisStyle | 'auto'>('auto');
   const [includeLinks, setIncludeLinks] = useState(true);
+  const [pfatcMode, setPfatcMode] = usePfatcMode();
 
   useEffect(() => {
     if (!open || !sessionId) return;
@@ -97,10 +99,12 @@ export default function RadarATIS({
       airports,
       ident,
       links: includeLinks
-        ? [formLink ?? '', PFTRACKER_FILE_URL].filter(Boolean)
+        ? [pfatcMode ? '' : (formLink ?? ''), PFTRACKER_FILE_URL].filter(
+            Boolean
+          )
         : [],
     }),
-    [sessionUsers, airports, ident, includeLinks, formLink]
+    [sessionUsers, airports, ident, includeLinks, formLink, pfatcMode]
   );
   const effectiveStyle: RadarAtisStyle =
     style === 'auto' ? bestRadarStyle(baseInput) : style;
@@ -215,8 +219,15 @@ export default function RadarATIS({
                 checked={includeLinks}
                 onCheckedChange={(c) => setIncludeLinks(c === true)}
               />
-              Add flight plan links (
-              {links.shortUrl ? 'short form link' : 'form link'} and PFTracker)
+              Add flight plan links
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <Checkbox
+                checked={pfatcMode}
+                onCheckedChange={(c) => setPfatcMode(c === true)}
+              />
+              PFATC mode: PFTracker link only (PFATC doesn't allow form or
+              StripLink links)
             </label>
             <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
               <span className="mr-1 text-zinc-400">ATIS style</span>

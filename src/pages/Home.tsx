@@ -136,11 +136,24 @@ export default function Home({ standalone = true }: HomeProps) {
         <div className="flex flex-col md:flex-row items-center justify-between w-full max-w-7xl mx-auto mt-16 md:mt-24 gap-10 md:gap-0 relative z-10">
           <div className="flex-1 max-w-5xl text-center md:text-left md:ml-12">
             <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold bg-gradient-to-br from-blue-400 to-blue-900 bg-clip-text text-transparent leading-[1.15] pb-2 mb-4">
-              The safe, free ATC platform for Project Flight
+              Flight strips for Project Flight, fed by Google Forms
             </h1>
-            <p className="text-base sm:text-xl text-white max-w-xl mx-auto md:mx-0 mb-8 sm:mb-10">
-              Trusted by thousands of controllers. Real-time flight strips with
-              the security and reliability your sessions deserve, free, always.
+            <p className="text-base sm:text-xl text-white max-w-xl mx-auto md:mx-0 mb-4">
+              Pilots file through a Google Form and their plan lands on your
+              board as a live strip. Free, no ads.
+            </p>
+            <p className="text-sm text-zinc-300 max-w-xl mx-auto md:mx-0 mb-8 sm:mb-10">
+              StripLink is a fork of{' '}
+              <a
+                href="https://github.com/cephie-studios/pfcontrol-2"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-white"
+              >
+                PFControl
+              </a>{' '}
+              by Cephie Studios, used under the AGPL-3.0. Not affiliated with
+              PFControl, Cephie Studios, Project Flight or PFATC.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 w-full">
               <Button
@@ -420,23 +433,27 @@ export default function Home({ standalone = true }: HomeProps) {
               StripLink
             </h2>
             <p className="text-base sm:text-xl text-gray-300 max-w-2xl">
-              The next-generation flight strip platform built for real-time
-              coordination between air traffic controllers.
+              PFControl's flight strip board, with Google Form intake and a few
+              extras for our own communities.
             </p>
             <ul className="space-y-4 text-gray-300 mt-6 text-left max-w-lg text-lg">
               <li className="flex items-start">
                 <ArrowRight className="mr-3 h-5 w-5 text-blue-400 flex-shrink-0 mt-1" />
                 <span>
-                  Enhanced real-time collaboration between controllers
+                  Google Form responses land on the board as live strips
                 </span>
               </li>
               <li className="flex items-start">
                 <ArrowRight className="mr-3 h-5 w-5 text-blue-400 flex-shrink-0 mt-1" />
-                <span>Redesigned interface for improved usability</span>
+                <span>Network-format ATIS, ready to paste into Discord</span>
               </li>
               <li className="flex items-start">
                 <ArrowRight className="mr-3 h-5 w-5 text-blue-400 flex-shrink-0 mt-1" />
-                <span>Advanced flight strip management system</span>
+                <span>PF Radar: one controller covering every airport</span>
+              </li>
+              <li className="flex items-start">
+                <ArrowRight className="mr-3 h-5 w-5 text-blue-400 flex-shrink-0 mt-1" />
+                <span>openCharts charts right on the board</span>
               </li>
             </ul>
             <div className="pt-8">
@@ -449,7 +466,7 @@ export default function Home({ standalone = true }: HomeProps) {
                 variant="outline"
                 className="px-8 py-4 text-base sm:text-lg font-semibold"
               >
-                Try the Latest Version Now
+                Start a Session
               </Button>
             </div>
           </div>
