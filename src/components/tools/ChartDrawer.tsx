@@ -7,6 +7,7 @@ import {
   FileText,
   LandPlot,
   Link2,
+  Download,
   Loader2,
   Lock,
   Map,
@@ -20,6 +21,7 @@ import {
   Waypoints,
   type LucideIcon,
 } from 'lucide-react';
+import { OPENCHARTS_DOWNLOAD_URL } from '../../utils/fetch/openCharts';
 import type { Settings } from '../../types/settings';
 import { PanelHeader } from '../common/SidePanel';
 import ChartViewer from '../charts/ChartViewer';
@@ -868,6 +870,15 @@ export default function ChartDrawer({
       >
         <PanelHeader icon={Map} title="Charts" onClose={onClose} />
         <div className="flex min-h-0 flex-1">{body}</div>
+        <a
+          href={OPENCHARTS_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex shrink-0 items-center justify-center gap-2 border-t border-zinc-800 px-4 py-2 text-xs text-zinc-400 hover:text-white"
+        >
+          <Download className="h-3.5 w-3.5" />
+          openCharts is also a free Windows app: download it
+        </a>
       </div>
     </TooltipProvider>
   );

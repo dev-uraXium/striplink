@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Download,
   Loader2,
   Lock,
   Map as MapIcon,
@@ -33,6 +34,7 @@ import { useChartSources } from '../hooks/useChartSources';
 import {
   fetchOpenChartsIndex,
   type OpenChartsIndex,
+  OPENCHARTS_DOWNLOAD_URL,
 } from '../utils/fetch/openCharts';
 import {
   CATEGORY_LABELS,
@@ -558,9 +560,18 @@ export default function Charts() {
             !cephieOff && (
               <div className="flex flex-col items-center gap-3 text-center">
                 <p className="max-w-xl text-sm text-zinc-300 sm:text-base">
-                  Aerodrome charts, SIDs and STARs for Project Flight airports,
-                  from openCharts.
+                  Aerodrome charts, SIDs, STARs, approaches and VFR charts for
+                  Project Flight airports, from openCharts.
                 </p>
+                <a
+                  href={OPENCHARTS_DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                >
+                  <Download className="h-4 w-4" />
+                  Get the openCharts app (Windows)
+                </a>
                 <div className="flex items-center gap-6">
                   <CountLabel icon={<MapPin />}>
                     {airports.length}{' '}

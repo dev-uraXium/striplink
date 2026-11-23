@@ -31,3 +31,7 @@ export async function fetchOpenChartsIndex(): Promise<OpenChartsIndex | null> {
     return null;
   }
 }
+
+/** The openCharts desktop app (Windows), latest release. */
+export const OPENCHARTS_DOWNLOAD_URL =
+  'https://github.com/Coral-Reef-Studios/opencharts/releases/latest';
