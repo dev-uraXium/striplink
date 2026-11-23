@@ -62,3 +62,15 @@ export async function fetchSharedFormSetup(): Promise<SharedFormSetup> {
   if (!res.ok) await apiError(res, 'Could not load the shared form setup');
   return res.json();
 }
+
+/** Public: the session's Google Form pilot link, or null. */
+export async function fetchPilotFormLink(sessionId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/forms/link/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { url: string | null };
+    return data.url;
+  } catch {
+    return null;
+  }
+}

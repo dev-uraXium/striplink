@@ -5,8 +5,10 @@ import type {
   ChartfoxChartSummary,
 } from './fetch/charts';
 import { celesbitPlateUrl, cephieChartUrl } from './fetch/charts';
+import type { OpenChart, OpenChartsIndex } from './fetch/openCharts';
+import { openChartUrl } from './fetch/openCharts';
 
-export type ChartSource = 'pfatc' | 'cephie' | 'celesbit' | 'chartfox';
+export type ChartSource = 'opencharts' | 'pfatc' | 'cephie' | 'celesbit' | 'chartfox';
 
 export type ChartCategory =
   | 'ground'
@@ -59,6 +61,7 @@ export const CATEGORY_LABELS: Record<ChartCategory, string> = {
 export const CHARTFOX_LOGO_URL = '/assets/images/chartfox.webp';
 
 export const SOURCE_ORDER: ChartSource[] = [
+  'opencharts',
   'cephie',
   'pfatc',
   'chartfox',
@@ -66,6 +69,7 @@ export const SOURCE_ORDER: ChartSource[] = [
 ];
 
 export const SOURCE_LABELS: Record<ChartSource, string> = {
+  opencharts: 'openCharts',
   pfatc: 'PFATC',
   cephie: 'Cephie',
   celesbit: 'Celesbit',
@@ -128,6 +132,54 @@ export function fromBundled(icao: string, chart: BundledChart): ChartEntry {
     chartfoxId: null,
     viewUrl: null,
   };
+}
+
+const OPENCHARTS_CATEGORY: Record<string, ChartCategory> = {
+  ground: 'ground',
+  SID: 'sid',
+  STAR: 'star',
+  approach: 'approach',
+  APP: 'approach',
+  VFR: 'general',
+  area: 'general',
+};
+
+export function fromOpenCharts(icao: string, chart: OpenChart): ChartEntry {
+  const procedure = chart.kind === 'SID' || chart.kind === 'STAR' ? chart.label : null;
+  const runways = (chart.rw ?? '').split(/[-/,\s]+/).filter(Boolean);
+  return {
+    id: `opencharts:${icao}:${chart.id}`,
+    airport: icao,
+    name: chart.title || chart.label,
+    code: procedure && procedure !== 'All' ? procedure : null,
+    category: OPENCHARTS_CATEGORY[chart.kind] ?? 'other',
+    source: 'opencharts',
+    credits: 'openCharts © uraXium · Coral Reef Studios',
+    procedures: procedure && procedure !== 'All' ? [procedure] : [],
+    runways,
+    imageUrl: openChartUrl(chart.id),
+    previewUrl: openChartUrl(chart.id, 'preview'),
+    chartfoxId: null,
+    viewUrl: null,
+  };
+}
+
+/** openCharts charts per airport; each airport also gets its region's area chart. */
+export function openChartsByAirport(index: OpenChartsIndex): Record<string, ChartEntry[]> {
+  const areaByRegion = new Map(
+    index.charts.filter((c) => c.kind === 'area' && c.region).map((c) => [c.region!, c])
+  );
+  const out: Record<string, ChartEntry[]> = {};
+  for (const chart of index.charts) {
+    if (!chart.icao) continue;
+    (out[chart.icao] ??= []).push(fromOpenCharts(chart.icao, chart));
+  }
+  for (const [icao, charts] of Object.entries(out)) {
+    const region = index.charts.find((c) => c.icao === icao)?.region;
+    const area = region ? areaByRegion.get(region) : undefined;
+    if (area) charts.push(fromOpenCharts(icao, area));
+  }
+  return out;
 }
 
 export function fromCelesbit(icao: string, plate: CelesbitPlate): ChartEntry {

@@ -177,6 +177,18 @@ router.delete('/shared', requireAuth, requireAdmin, async (_req, res) => {
   res.json({ ok: true });
 });
 
+// GET: /api/forms/link/:sessionId - public: the pilot link for this session's Submit Link,
+// or null when the shared form isn't set up or intake is off for the session
+router.get('/link/:sessionId', async (req, res) => {
+  const sessionId = validSessionParam(req.params.sessionId);
+  if (!sessionId) return res.status(400).json({ error: 'Invalid session' });
+  const settings = await getFormSettings(sessionId);
+  if (!settings) return res.status(404).json({ error: 'Session not found' });
+  const shared = settings.form_webhook_secret ? await getSharedForm().catch(() => null) : null;
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ url: sharedFormLink(shared, sessionId) });
+});
+
 // ---------- owner settings ----------
 const owner = [requireAuth, requireSessionOwnership];
 

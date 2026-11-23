@@ -3,6 +3,7 @@ import { clientApiUrl } from '../utils/clientApiBase';
 import type { ChartSourceState } from '../types/chartSources';
 
 const ALL_ON: ChartSourceState = {
+  opencharts: true,
   pfatc: true,
   cephie: true,
   celesbit: true,

@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Loader, Info, RefreshCw, Copy } from 'lucide-react';
+import { Loader, Info, RefreshCw, Copy, MessageSquare } from 'lucide-react';
+import { buildNetworkAtis } from '../../lib/networkAtis';
+import type { SessionUser } from '../../types/session';
 import { useData } from '../../hooks/data/useData';
 import { fetchMetar } from '../../utils/fetch/metar';
 import { generateATIS } from '../../utils/fetch/atis';
@@ -33,6 +35,8 @@ interface ATISProps {
   onClose: () => void;
   socket?: Socket | undefined;
   onAtisUpdate?: (atis: ATISData) => void;
+  /** Controllers in the session, for the network-format @mentions. */
+  sessionUsers?: SessionUser[];
 }
 
 export default function ATIS({
@@ -44,8 +48,10 @@ export default function ATIS({
   onClose,
   socket,
   onAtisUpdate,
+  sessionUsers = [],
 }: ATISProps) {
-  const { airportRunways, fetchAirportData, fetchedAirports } = useData();
+  const { airportRunways, fetchAirportData, fetchedAirports, airports } = useData();
+  const [networkCopied, setNetworkCopied] = useState(false);
   const [ident, setIdent] = useState<string>('A');
   const [selectedApproaches, setSelectedApproaches] = useState<string[]>([
     'ILS',
@@ -399,6 +405,32 @@ export default function ATIS({
     }
   };
 
+  const airport = airports.find((a) => a.icao === icao);
+  const networkAtis = useMemo(
+    () =>
+      atisText && airport
+        ? buildNetworkAtis({
+            icao,
+            airportName: airport.name,
+            controlName: airport.controlName,
+            frequencies: airport.allFrequencies ?? {},
+            controllers: sessionUsers.map((u) => ({ id: u.id, position: u.position })),
+            atisText,
+          })
+        : '',
+    [atisText, airport, icao, sessionUsers]
+  );
+
+  const copyNetworkAtis = async () => {
+    try {
+      await navigator.clipboard.writeText(networkAtis);
+      setNetworkCopied(true);
+      setTimeout(() => setNetworkCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  };
+
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(atisText);
@@ -458,6 +490,31 @@ export default function ATIS({
             <div className="whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-black p-4 font-mono text-sm text-green-400">
               {atisText}
             </div>
+          </PanelSection>
+        )}
+
+        {networkAtis && (
+          <PanelSection
+            title="Network format (Discord)"
+            actions={
+              <Button
+                onClick={copyNetworkAtis}
+                size="xs"
+                variant={networkCopied ? 'success' : 'primary'}
+                className="h-8 gap-1.5"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                {networkCopied ? 'Copied!' : 'Copy for Discord'}
+              </Button>
+            }
+          >
+            <div className="whitespace-pre-wrap break-words rounded-2xl border border-zinc-800 bg-black p-4 font-mono text-xs text-zinc-300">
+              {networkAtis}
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              Positions come from what each controller picked on the board. Pick yours in the position menu so the
+              right line mentions you.
+            </p>
           </PanelSection>
         )}
 

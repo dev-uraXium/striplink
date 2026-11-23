@@ -788,6 +788,7 @@ export default function Toolbar({
             onClose={handleAtisClose}
             socket={socketRef.current ?? undefined}
             onAtisUpdate={handleAtisUpdate}
+            sessionUsers={activeUsers}
           />
         </div>
       </div>

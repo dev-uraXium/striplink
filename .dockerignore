@@ -18,4 +18,4 @@ dist
 Thumbs.db
 astro/dist
 astro/.astro
-astro/node_modules
+astro/node_modulescloudflare

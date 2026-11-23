@@ -4,6 +4,9 @@
   "main": "worker.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
+  // openCharts images (public/charts/opencharts) are served straight from the edge;
+  // everything else falls through to worker.js and the Render origin.
+  "assets": { "directory": "./public", "not_found_handling": "none" },
   "vars": {
     "ORIGIN": "https://striplink.onrender.com"
   },

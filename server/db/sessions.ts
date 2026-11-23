@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { sql } from 'kysely';
 import { mainDb, redisConnection } from './connection.js';
 import { addFlight } from './flights.js';
@@ -61,6 +62,8 @@ export async function createSession({
       is_advanced_atc: isAdvancedAtc,
       atis: JSON.stringify(encryptedAtis),
       external_session: externalSession ?? null,
+      // StripLink: Google Form intake on by default (the Submit Link hands out the form)
+      form_webhook_secret: crypto.randomBytes(24).toString('base64url'),
       ...(developerApiKeyId ? { developer_api_key_id: developerApiKeyId } : {}),
     };
     await mainDb.insertInto('sessions').values(baseValues).execute();

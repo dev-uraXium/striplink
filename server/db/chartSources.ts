@@ -1,6 +1,7 @@
 import { mainDb } from './connection.js';
 
 export const CHART_SOURCES = [
+  'opencharts',
   'pfatc',
   'cephie',
   'celesbit',

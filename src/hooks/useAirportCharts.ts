@@ -7,7 +7,9 @@ import {
   type CephieChartIndex,
 } from '../utils/fetch/charts';
 import { useChartSources } from './useChartSources';
+import { fetchOpenChartsIndex, type OpenChartsIndex } from '../utils/fetch/openCharts';
 import {
+  openChartsByAirport,
   fromBundled,
   fromCelesbit,
   fromCephie,
@@ -29,16 +31,21 @@ function cachedLoader<T>(load: () => Promise<T | null>) {
 
 const loadIndex = cachedLoader<CelesbitChartIndex>(fetchCelesbitCharts);
 const loadCephieIndex = cachedLoader<CephieChartIndex>(fetchCephieCharts);
+const loadOpenCharts = cachedLoader<OpenChartsIndex>(fetchOpenChartsIndex);
 
 export function useAirportCharts() {
   const [index, setIndex] = useState<CelesbitChartIndex | null>(null);
   const [cephieIndex, setCephieIndex] = useState<CephieChartIndex | null>(null);
+  const [openCharts, setOpenCharts] = useState<Record<string, ChartEntry[]> | null>(null);
   const sources = useChartSources();
 
   useEffect(() => {
     let cancelled = false;
     loadIndex().then((result) => {
       if (!cancelled) setIndex(result);
+    });
+    loadOpenCharts().then((result) => {
+      if (!cancelled && result) setOpenCharts(openChartsByAirport(result));
     });
     loadCephieIndex().then((result) => {
       if (!cancelled) setCephieIndex(result);
@@ -53,6 +60,7 @@ export function useAirportCharts() {
       if (!sources) return [];
       const code = icao.toUpperCase();
       return [
+        ...((sources.opencharts && openCharts?.[code]) || []),
         ...(sources.pfatc ? getBundledCharts(code) : []).map((chart) =>
           fromBundled(code, chart)
         ),
@@ -64,7 +72,7 @@ export function useAirportCharts() {
         ),
       ];
     },
-    [index, cephieIndex, sources]
+    [index, cephieIndex, openCharts, sources]
   );
 
   return { getLocalCharts };

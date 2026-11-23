@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync } from 'fs';
@@ -205,6 +206,17 @@ function setHashedStaticHeaders(res: Response, filePath: string): void {
     res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   } else if (filePath.endsWith('.css')) {
     res.setHeader('Content-Type', 'text/css; charset=utf-8');
+  }
+}
+
+// openCharts images: served by the Cloudflare Worker in production; locally from the repo
+for (const dir of [
+  path.join(__dirname, '../cloudflare/public/charts/opencharts'),
+  path.join(__dirname, '../../cloudflare/public/charts/opencharts'),
+]) {
+  if (fs.existsSync(dir)) {
+    app.use('/charts/opencharts', express.static(dir, { maxAge: '7d' }));
+    break;
   }
 }
 

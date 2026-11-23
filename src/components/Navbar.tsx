@@ -1,3 +1,4 @@
+import { fetchPilotFormLink } from '../utils/fetch/forms';
 import {
   Menu,
   X,
@@ -192,7 +193,17 @@ export default function Navbar({
   ].join(' ');
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const submitLink = `${origin}/submit/${sessionId}`;
+  // StripLink: Submit Link hands pilots the shared Google Form when it's available
+  const [formLink, setFormLink] = useState<string | null>(null);
+  useEffect(() => {
+    if (!sessionId || !accessId) return;
+    let cancelled = false;
+    fetchPilotFormLink(sessionId).then((url) => !cancelled && setFormLink(url));
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, accessId]);
+  const submitLink = formLink ?? `${origin}/submit/${sessionId}`;
   const viewLink = `${origin}/view/${sessionId}?accessId=${accessId}`;
 
   const handleCopy = async (text: string) => {
