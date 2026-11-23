@@ -7,23 +7,29 @@ import {
   Check,
   ClipboardList,
   Copy,
+  ExternalLink,
   Eye,
   EyeOff,
+  Link2,
   Loader2,
+  ShieldCheck,
   Send,
   X,
 } from 'lucide-react';
 import Button from '../common/Button';
 import { useData } from '../../hooks/data/useData';
-import { buildAppsScript } from '../../lib/formsAppsScript';
+import { useAuth } from '../../hooks/auth/useAuth';
+import { buildAppsScript, buildSharedAppsScript } from '../../lib/formsAppsScript';
 import {
   disableFormIntake,
   enableFormIntake,
   fetchFormSettings,
+  fetchSharedFormSetup,
   rotateFormSecret,
   sendTestFormFlight,
   setGoogleFormId,
   type FormSettings,
+  type SharedFormSetup,
 } from '../../utils/fetch/forms';
 
 interface Props {
@@ -38,6 +44,8 @@ const RECOGNISED =
 
 export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIcao }: Props) {
   const { airports } = useData();
+  const { user } = useAuth();
+  const [sharedSetup, setSharedSetup] = useState<SharedFormSetup | null>(null);
   const [settings, setSettings] = useState<FormSettings | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,6 +105,13 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
     } catch {
       toast.error('Could not copy, select the text and copy it manually');
     }
+  };
+
+  const loadSharedSetup = () => {
+    if (sharedSetup) return;
+    fetchSharedFormSetup()
+      .then(setSharedSetup)
+      .catch((e: Error) => toast.error(e.message));
   };
 
   const isLocal = settings ? /\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(settings.webhookUrl) : false;
@@ -163,9 +178,12 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
           {settings && !settings.enabled && (
             <div className="space-y-4">
               <p>
-                Let pilots file through a Google Form instead of (or as well as) the submit link. Turning this on
-                gives the session a private webhook; you paste a short script into the form and every response
+                Let pilots file through a Google Form instead of (or as well as) the submit link. Every response
                 lands here as a pending strip, with the squawk, runway and SID filled in like a normal submission.
+                {' '}
+                {settings.sharedFormUrl
+                  ? 'Turn it on to get a ready-made form link for this session, or connect your own form.'
+                  : 'Turning this on gives the session a private webhook for a short script you paste into your form.'}
               </p>
               <Button
                 onClick={() => run('enable', () => enableFormIntake(sessionId), 'Google Form intake is on')}
@@ -190,7 +208,38 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                 </div>
               )}
 
-              <ol className="space-y-4">
+              {settings.sharedFormUrl && (
+                <div className="space-y-3 rounded-2xl border-2 border-blue-600/60 bg-blue-600/10 p-4">
+                  <div className="flex items-center gap-2 font-semibold text-white">
+                    <Link2 className="h-4 w-4 text-blue-300" />
+                    Pilot link
+                  </div>
+                  <p className="text-zinc-300">
+                    Share this with pilots. It opens the StripLink flight plan form with this session already
+                    filled in, so responses land straight on this board. Nothing to set up.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded-full bg-black/40 px-3 py-1.5 font-mono text-xs text-zinc-200">
+                      {settings.sharedFormUrl}
+                    </code>
+                    <CopyButton id="shared" text={settings.sharedFormUrl} label="Copy link" />
+                    <a
+                      href={settings.sharedFormUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-full border-2 border-zinc-700 px-3 py-1 text-xs font-semibold text-zinc-300 hover:border-blue-600 hover:text-white"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Open
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              <details open={!settings.sharedFormUrl} className="group space-y-4">
+                <summary className="cursor-pointer select-none font-semibold text-white">
+                  {settings.sharedFormUrl ? 'Use your own Google Form instead' : 'Connect your Google Form'}
+                </summary>
+              <ol className="mt-4 space-y-4">
                 <li className="flex gap-3">
                   <Step n={1} />
                   <div className="flex-1 space-y-2">
@@ -275,6 +324,8 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                 </div>
               )}
 
+              </details>
+
               <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-5">
                 <Button
                   size="sm"
@@ -312,6 +363,58 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                 </Button>
               </div>
             </>
+          )}
+
+          {user?.isAdmin && (
+            <details
+              className="rounded-2xl border border-zinc-800 p-4"
+              onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && loadSharedSetup()}
+            >
+              <summary className="flex cursor-pointer select-none items-center gap-2 font-semibold text-white">
+                <ShieldCheck className="h-4 w-4 text-blue-300" />
+                Admin: shared StripLink form
+              </summary>
+              {!sharedSetup ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-400" />
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <p>
+                    {sharedSetup.configured ? (
+                      <>
+                        Every session hands out{' '}
+                        {sharedSetup.editUrl ? (
+                          <a href={sharedSetup.editUrl} target="_blank" rel="noreferrer" className="text-blue-300 underline">
+                            {sharedSetup.title ?? 'the shared form'}
+                          </a>
+                        ) : (
+                          (sharedSetup.title ?? 'the shared form')
+                        )}
+                        . Run the script again on another form to replace it.
+                      </>
+                    ) : (
+                      'No shared form yet. One form, owned by you, that every session can hand to pilots.'
+                    )}
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-5 text-zinc-400">
+                    <li>Create an empty Google Form, then ⋮ → Apps Script.</li>
+                    <li>Paste this script and run <Code>setupStripLinkForm</Code> once (approve the prompt).</li>
+                    <li>Reopen this panel: the pilot link shows up for every session with intake on.</li>
+                  </ol>
+                  <CopyButton
+                    id="shared-script"
+                    label="Copy setup script"
+                    text={buildSharedAppsScript(
+                      sharedSetup.webhookUrl,
+                      sharedSetup.registerUrl,
+                      sharedSetup.secret,
+                      airportList
+                    )}
+                  />
+                </div>
+              )}
+            </details>
           )}
         </div>
       </div>

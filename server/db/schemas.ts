@@ -1240,6 +1240,14 @@ export async function ensureSessionsGoogleFormColumns() {
     ALTER TABLE flights
     ADD COLUMN IF NOT EXISTS submitted_via varchar(16)
   `.execute(mainDb);
+  // StripLink-wide settings (e.g. the shared Google Form)
+  await sql`
+    CREATE TABLE IF NOT EXISTS striplink_settings (
+      key varchar(64) PRIMARY KEY,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `.execute(mainDb);
 }
 
 export async function ensureControllerRatingsCommentAndSessionColumns() {

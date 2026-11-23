@@ -9,6 +9,8 @@ export interface FormSettings {
   secret: string | null;
   webhookUrl: string;
   googleFormId: string | null;
+  /** The site-wide StripLink form with this session pre-filled (null until an admin sets it up). */
+  sharedFormUrl: string | null;
   poller: { available: boolean; serviceAccountEmail: string | null };
 }
 
@@ -43,3 +45,20 @@ export const setGoogleFormId = (sessionId: string, formId: string): Promise<Form
 
 export const sendTestFormFlight = (sessionId: string): Promise<{ ok: true; callsign: string }> =>
   call(`${sessionId}/test`, { method: 'POST' }, 'Could not send the test flight');
+
+export interface SharedFormSetup {
+  webhookUrl: string;
+  registerUrl: string;
+  secret: string;
+  configured: boolean;
+  editUrl: string | null;
+  title: string | null;
+  registeredAt: string | null;
+}
+
+/** Admin only. */
+export async function fetchSharedFormSetup(): Promise<SharedFormSetup> {
+  const res = await apiFetch(`${API_BASE_URL}/api/forms/shared/setup`, { credentials: 'include' });
+  if (!res.ok) await apiError(res, 'Could not load the shared form setup');
+  return res.json();
+}

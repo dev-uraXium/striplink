@@ -87,3 +87,108 @@ function buildFlightPlanForm() {
 }
 `;
 }
+
+// The site admin's script for the one shared StripLink form. It builds the form,
+// installs the submit trigger and registers the form's pre-filled link with
+// StripLink, so every session can hand pilots its own link.
+export function buildSharedAppsScript(
+  webhookUrl: string,
+  registerUrl: string,
+  secret: string,
+  airports: string[] = []
+) {
+  const airportList = airports.length
+    ? airports.map((a) => `  '${a.replace(/'/g, '')}',`).join('\n')
+    : "  'EGKK',";
+  return `/**
+ * StripLink shared flight plan form (site admin only).
+ *
+ * 1. Create a new, empty Google Form, open ⋮ → Apps Script and paste this.
+ * 2. Run setupStripLinkForm once and approve Google's permission prompt.
+ *    It adds the questions, installs the trigger and registers the form with StripLink.
+ * Every session's Google Form panel then shows its own link to this form.
+ * Keep this script private: the secret lets anyone file flights.
+ */
+const STRIPLINK_URL = '${webhookUrl}';
+const STRIPLINK_REGISTER_URL = '${registerUrl}';
+const STRIPLINK_SECRET = '${secret}';
+const SESSION_QUESTION = 'StripLink session';
+const PLACEHOLDER = '__STRIPLINK_SESSION__';
+
+function onFormSubmit(e) {
+  const response = e.response;
+  const answers = {};
+  response.getItemResponses().forEach(function (item) {
+    answers[item.getItem().getTitle()] = item.getResponse();
+  });
+  post_(STRIPLINK_URL, { responseId: response.getId(), answers: answers });
+}
+
+function post_(url, payload) {
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'X-StripLink-Secret': STRIPLINK_SECRET },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  const code = res.getResponseCode();
+  if (code >= 300) console.error('StripLink ' + code + ': ' + res.getContentText());
+  else console.log('StripLink: ' + res.getContentText());
+  return code;
+}
+
+// Airports for the dropdowns. Only the first 4 letters are used.
+const PF_AIRPORTS = [
+${airportList}
+];
+
+/** Run once on an empty form. Safe to run again: it only adds missing questions. */
+function setupStripLinkForm() {
+  const form = FormApp.getActiveForm();
+  if (form.getItems().length === 0) {
+    form.setTitle('StripLink flight plan');
+    form.setDescription('File your flight plan. It goes straight onto your controller\\'s StripLink board.');
+    form.addTextItem().setTitle(SESSION_QUESTION)
+      .setHelpText('Filled in by your controller\\'s link. Don\\'t change it.').setRequired(true);
+    form.addTextItem().setTitle('Roblox username').setRequired(true);
+    form.addTextItem().setTitle('Callsign').setHelpText('e.g. BAW123').setRequired(true);
+    form.addTextItem().setTitle('Aircraft').setHelpText('ICAO type, e.g. A320, B738').setRequired(true);
+    form.addMultipleChoiceItem().setTitle('Flight rules').setChoiceValues(['IFR', 'VFR']).setRequired(true);
+    form.addListItem().setTitle('Departure').setChoiceValues(PF_AIRPORTS).setRequired(true);
+    form.addListItem().setTitle('Arrival').setChoiceValues(PF_AIRPORTS).setRequired(true);
+    form.addTextItem().setTitle('Cruising level').setHelpText('e.g. 350 for FL350').setRequired(true);
+    form.addParagraphTextItem().setTitle('Route').setHelpText('DCT if direct');
+    form.addTextItem().setTitle('Stand');
+    form.addParagraphTextItem().setTitle('Remarks');
+  }
+  form.setCollectEmail(false);
+  form.setAllowResponseEdits(false);
+
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('onFormSubmit').forForm(form).onFormSubmit().create();
+
+  registerWithStripLink();
+}
+
+/** Tells StripLink this form's pre-filled link. Run again if you rename the session question. */
+function registerWithStripLink() {
+  const form = FormApp.getActiveForm();
+  const item = form.getItems(FormApp.ItemType.TEXT).filter(function (i) {
+    return i.getTitle() === SESSION_QUESTION;
+  })[0];
+  if (!item) throw new Error('Add a short-answer question titled "' + SESSION_QUESTION + '" first.');
+  const prefill = form.createResponse()
+    .withItemResponse(item.asTextItem().createResponse(PLACEHOLDER))
+    .toPrefilledUrl();
+  const code = post_(STRIPLINK_REGISTER_URL, {
+    prefillTemplate: prefill,
+    editUrl: form.getEditUrl(),
+    title: form.getTitle(),
+  });
+  if (code < 300) console.log('Registered "' + form.getTitle() + '" with StripLink. Pilot link: ' + form.getPublishedUrl());
+}
+`;
+}

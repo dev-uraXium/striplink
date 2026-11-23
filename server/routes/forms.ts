@@ -1,6 +1,8 @@
 // StripLink: Google Forms intake.
 //   POST /api/forms/webhook/:sessionId        <- called by the form's Apps Script
 //   GET/POST /api/forms/session/:sessionId/*  <- session owner manages it from the board
+//   POST /api/forms/shared[/register]         <- the site-wide shared form (see forms/shared.ts)
+//   GET  /api/forms/shared/setup               <- admin: what the shared form's script needs
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { mainDb } from '../db/connection.js';
@@ -15,6 +17,15 @@ import {
   secretsMatch,
 } from '../forms/intake.js';
 import { formsPollerInfo } from '../forms/poller.js';
+import { requireAdmin } from '../middleware/admin.js';
+import {
+  getSharedForm,
+  setSharedForm,
+  sharedFormLink,
+  sharedFormSecret,
+  splitSessionAnswer,
+  validPrefillTemplate,
+} from '../forms/shared.js';
 import type { FormAnswers } from '../forms/fieldMap.js';
 
 const router = express.Router();
@@ -79,20 +90,109 @@ router.post('/webhook/:sessionId', webhookLimiter, async (req, res) => {
   }
 });
 
+// ---------- shared form (one form for every session) ----------
+function publicBase(req: express.Request) {
+  return (process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+}
+
+const sharedLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => {
+    const answers = parseAnswers(req.body);
+    return `forms:shared:${(answers && splitSessionAnswer(answers).sessionId) || 'unknown'}`;
+  },
+  message: { error: 'Too many form submissions for this session. Slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// POST: /api/forms/shared - a response from the shared form; routed by its session answer
+router.post('/shared', sharedLimiter, async (req, res) => {
+  if (!secretsMatch(req.get('x-striplink-secret'), sharedFormSecret())) {
+    return res.status(401).json({ error: 'Bad secret' });
+  }
+  const answers = parseAnswers(req.body);
+  if (!answers) return res.status(400).json({ error: 'Expected { "answers": { "Question": "Answer" } }' });
+
+  const { sessionId: rawSession, rest } = splitSessionAnswer(answers);
+  const sessionId = validSessionParam(rawSession);
+  if (!sessionId) {
+    return res.status(400).json({ error: 'No StripLink session in the response. Pilots must use their controller\'s link.' });
+  }
+  const settings = await getFormSettings(sessionId);
+  if (!settings) return res.status(404).json({ error: 'Session not found' });
+  if (!settings.form_webhook_secret) {
+    return res.status(403).json({ error: 'Google Form intake is turned off for this session' });
+  }
+
+  const responseId =
+    typeof req.body?.responseId === 'string' ? req.body.responseId.slice(0, 200) : null;
+  try {
+    const flight = await fileFormResponse(sessionId, rest, responseId);
+    if (!flight) return res.json({ ok: true, duplicate: true });
+    res.status(201).json({ ok: true, sessionId, flightId: flight.id, callsign: flight.callsign });
+  } catch (err) {
+    if (err instanceof FormIntakeError) return res.status(err.status).json({ error: err.message });
+    console.error('[forms] shared webhook failed:', err);
+    res.status(500).json({ error: 'Failed to file the flight' });
+  }
+});
+
+// POST: /api/forms/shared/register - the setup script tells StripLink which form to hand out
+router.post('/shared/register', async (req, res) => {
+  if (!secretsMatch(req.get('x-striplink-secret'), sharedFormSecret())) {
+    return res.status(401).json({ error: 'Bad secret' });
+  }
+  const prefillTemplate = validPrefillTemplate(req.body?.prefillTemplate);
+  if (!prefillTemplate) return res.status(400).json({ error: 'Expected a Google Forms pre-filled link' });
+  const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+  await setSharedForm({
+    prefillTemplate,
+    editUrl: str(req.body?.editUrl, 500),
+    title: str(req.body?.title, 200),
+    registeredAt: new Date().toISOString(),
+  });
+  res.json({ ok: true });
+});
+
+// GET: /api/forms/shared/setup - admin only: values for the shared form's setup script
+router.get('/shared/setup', requireAuth, requireAdmin, async (req, res) => {
+  const config = await getSharedForm();
+  const base = publicBase(req);
+  res.json({
+    webhookUrl: `${base}/api/forms/shared`,
+    registerUrl: `${base}/api/forms/shared/register`,
+    secret: sharedFormSecret(),
+    configured: Boolean(config),
+    editUrl: config?.editUrl ?? null,
+    title: config?.title ?? null,
+    registeredAt: config?.registeredAt ?? null,
+  });
+});
+
+// DELETE: /api/forms/shared - admin only: stop handing out the shared form
+router.delete('/shared', requireAuth, requireAdmin, async (_req, res) => {
+  await setSharedForm(null);
+  res.json({ ok: true });
+});
+
 // ---------- owner settings ----------
 const owner = [requireAuth, requireSessionOwnership];
 
-function settingsPayload(
+async function settingsPayload(
   req: express.Request,
   row: { session_id: string; form_webhook_secret?: string | null; google_form_id?: string | null }
 ) {
-  const base = (process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+  const base = publicBase(req);
   const poller = formsPollerInfo();
+  const shared = await getSharedForm().catch(() => null);
   return {
     enabled: Boolean(row.form_webhook_secret),
     secret: row.form_webhook_secret ?? null,
     webhookUrl: `${base}/api/forms/webhook/${row.session_id}`,
     googleFormId: row.google_form_id ?? null,
+    sharedFormUrl: sharedFormLink(shared, row.session_id),
     poller,
   };
 }
@@ -109,7 +209,7 @@ async function updateSession(
 router.get('/session/:sessionId', ...owner, async (req, res) => {
   const row = await getFormSettings(String(req.params.sessionId));
   if (!row) return res.status(404).json({ error: 'Session not found' });
-  res.json(settingsPayload(req, row));
+  res.json(await settingsPayload(req, row));
 });
 
 // POST: /api/forms/session/:sessionId/enable - turn on (keeps an existing secret)
@@ -119,14 +219,14 @@ router.post('/session/:sessionId/enable', ...owner, async (req, res) => {
   const row = current.form_webhook_secret
     ? current
     : await updateSession(current.session_id, { form_webhook_secret: newFormSecret() });
-  res.json(settingsPayload(req, row!));
+  res.json(await settingsPayload(req, row!));
 });
 
 // POST: /api/forms/session/:sessionId/rotate - new secret; the old script stops working
 router.post('/session/:sessionId/rotate', ...owner, async (req, res) => {
   const row = await updateSession(String(req.params.sessionId), { form_webhook_secret: newFormSecret() });
   if (!row) return res.status(404).json({ error: 'Session not found' });
-  res.json(settingsPayload(req, row));
+  res.json(await settingsPayload(req, row));
 });
 
 // POST: /api/forms/session/:sessionId/disable
@@ -136,7 +236,7 @@ router.post('/session/:sessionId/disable', ...owner, async (req, res) => {
     google_form_id: null,
   });
   if (!row) return res.status(404).json({ error: 'Session not found' });
-  res.json(settingsPayload(req, row));
+  res.json(await settingsPayload(req, row));
 });
 
 /** Accepts a raw form ID or an editor URL (…/forms/d/<id>/edit). */
@@ -165,7 +265,7 @@ router.put('/session/:sessionId/google-form', ...owner, async (req, res) => {
     // Linking a form also turns intake on
     ...(formId && !current.form_webhook_secret ? { form_webhook_secret: newFormSecret() } : {}),
   });
-  res.json(settingsPayload(req, row!));
+  res.json(await settingsPayload(req, row!));
 });
 
 // POST: /api/forms/session/:sessionId/test - file a sample flight to check the board
