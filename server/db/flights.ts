@@ -762,9 +762,9 @@ export async function addFlight(
     flightData.departure !== sessionForDefaults.airport_icao?.toUpperCase();
   if (!flightData.runway && radarElsewhere) {
     try {
-      const airport = (getAirportData() as { icao: string; runways?: string[] }[]).find(
-        (a) => a.icao === flightData.departure
-      );
+      const airport = (
+        getAirportData() as { icao: string; runways?: string[] }[]
+      ).find((a) => a.icao === flightData.departure);
       if (airport?.runways?.[0]) flightData.runway = airport.runways[0];
     } catch (error) {
       console.error('Error reading airport data for radar runway:', error);

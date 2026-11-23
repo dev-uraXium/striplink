@@ -25,9 +25,7 @@ import {
 } from '../db/flights.js';
 import { getAllFlightsForSession } from '../realtime/flightsRead.js';
 import { getPlanLimits } from '../billing/limits.js';
-import {
-  broadcastFlightEvent,
-} from '../websockets/flightsWebsocket.js';
+import { broadcastFlightEvent } from '../websockets/flightsWebsocket.js';
 import { getSessionById } from '../db/sessions.js';
 import { getClientIp } from '../utils/getIpAddress.js';
 import { submitFlightAndBroadcast } from '../services/submitFlight.js';

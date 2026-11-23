@@ -9,6 +9,8 @@ export interface RadarAirportAtis {
   name: string;
   runway: string | null;
   text: string | null;
+  /** Raw METAR used (for the compact network format) */
+  metar?: string | null;
   error?: string;
 }
 
@@ -23,7 +25,11 @@ interface AirportRow {
 /** Airports PF Radar covers: real airports with runways (not the Center/control entries). */
 export function radarAirports(): AirportRow[] {
   return (getAirportData() as AirportRow[]).filter(
-    (a) => !a.retired && Array.isArray(a.runways) && a.runways.length > 0 && !/center|control/i.test(a.controlName ?? '')
+    (a) =>
+      !a.retired &&
+      Array.isArray(a.runways) &&
+      a.runways.length > 0 &&
+      !/center|control/i.test(a.controlName ?? '')
   );
 }
 
@@ -55,7 +61,9 @@ const NEAREST_METAR: Record<string, string> = {
 };
 
 async function metarFor(icao: string): Promise<string | null> {
-  for (const station of [icao, NEAREST_METAR[icao]].filter(Boolean) as string[]) {
+  for (const station of [icao, NEAREST_METAR[icao]].filter(
+    Boolean
+  ) as string[]) {
     const result = await resolveAviationMetar(station);
     const raw = result.ok ? result.body.rawOb : undefined;
     if (typeof raw === 'string' && raw.trim()) return raw;
@@ -63,12 +71,21 @@ async function metarFor(icao: string): Promise<string | null> {
   return null;
 }
 
-async function oneAirport(airport: AirportRow, ident: string): Promise<RadarAirportAtis> {
+async function oneAirport(
+  airport: AirportRow,
+  ident: string
+): Promise<RadarAirportAtis> {
   const name = airport.controlName || airport.name || airport.icao;
   try {
     const metar = await metarFor(airport.icao);
     if (!metar) {
-      return { icao: airport.icao, name, runway: null, text: null, error: 'No METAR available' };
+      return {
+        icao: airport.icao,
+        name,
+        runway: null,
+        text: null,
+        error: 'No METAR available',
+      };
     }
     const runway = runwayForWind(airport.runways!, metar);
     const text = generateAtisText({
@@ -78,7 +95,7 @@ async function oneAirport(airport: AirportRow, ident: string): Promise<RadarAirp
       landingRunways: [runway],
       departingRunways: [runway],
     });
-    return { icao: airport.icao, name, runway, text };
+    return { icao: airport.icao, name, runway, text, metar };
   } catch (err) {
     return {
       icao: airport.icao,
@@ -90,12 +107,18 @@ async function oneAirport(airport: AirportRow, ident: string): Promise<RadarAirp
   }
 }
 
-export async function generateRadarAtis(ident: string): Promise<RadarAirportAtis[]> {
+export async function generateRadarAtis(
+  ident: string
+): Promise<RadarAirportAtis[]> {
   const airports = radarAirports();
   const out: RadarAirportAtis[] = [];
   // A few at a time so METAR lookups don't all hit at once
   for (let i = 0; i < airports.length; i += 4) {
-    out.push(...(await Promise.all(airports.slice(i, i + 4).map((a) => oneAirport(a, ident)))));
+    out.push(
+      ...(await Promise.all(
+        airports.slice(i, i + 4).map((a) => oneAirport(a, ident))
+      ))
+    );
   }
   return out;
 }

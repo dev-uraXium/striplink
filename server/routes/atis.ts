@@ -101,14 +101,23 @@ router.post('/generate', requireAuth, async (req, res) => {
 router.post('/generate-radar', requireAuth, async (req, res) => {
   try {
     const { sessionId, ident } = req.body ?? {};
-    if (typeof sessionId !== 'string' || typeof ident !== 'string' || !/^[A-Za-z]$/.test(ident)) {
-      return res.status(400).json({ error: 'Session ID and a one-letter ident are required' });
+    if (
+      typeof sessionId !== 'string' ||
+      typeof ident !== 'string' ||
+      !/^[A-Za-z]$/.test(ident)
+    ) {
+      return res
+        .status(400)
+        .json({ error: 'Session ID and a one-letter ident are required' });
     }
     const session = await getSessionById(sessionId);
     if (!session) return res.status(404).json({ error: 'Session not found' });
-    if (!session.is_radar) return res.status(400).json({ error: 'Not a PF Radar session' });
+    if (!session.is_radar)
+      return res.status(400).json({ error: 'Not a PF Radar session' });
     if (session.created_by !== req.user?.userId) {
-      return res.status(403).json({ error: 'Only the session owner can update its ATIS' });
+      return res
+        .status(403)
+        .json({ error: 'Only the session owner can update its ATIS' });
     }
 
     const letter = ident.toUpperCase();
@@ -122,7 +131,14 @@ router.post('/generate-radar', requireAuth, async (req, res) => {
     await updateSession(sessionId, {
       atis: JSON.stringify(encrypt({ letter, text, timestamp, airports })),
     });
-    res.json({ letter, timestamp, airports, text, atisText: text, ident: letter });
+    res.json({
+      letter,
+      timestamp,
+      airports,
+      text,
+      atisText: text,
+      ident: letter,
+    });
   } catch (error) {
     console.error('Error generating radar ATIS:', error);
     res.status(500).json({ error: 'Failed to generate the PF Radar ATIS' });

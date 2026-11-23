@@ -1,12 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { planToAnswers, wantsPfTrackerImport, withoutImportQuestion, mergeAnswers } from '../../../server/forms/pftracker.js';
+import {
+  planToAnswers,
+  wantsPfTrackerImport,
+  withoutImportQuestion,
+  mergeAnswers,
+} from '../../../server/forms/pftracker.js';
 import { answersToFlight } from '../../../server/forms/fieldMap.js';
 
 const plan = {
   id: '01a208a3',
   user: 'Indian_GamerTamilan',
-  departureInfo: { departureAirport: 'EGKK', arrivalAirport: 'LCLK', alternateAirport: 'LCRA' },
-  selections: { flightRules: 'IFR', departureRunway: '26L', arrivalRunway: '22', altitude: 10000 },
+  departureInfo: {
+    departureAirport: 'EGKK',
+    arrivalAirport: 'LCLK',
+    alternateAirport: 'LCRA',
+  },
+  selections: {
+    flightRules: 'IFR',
+    departureRunway: '26L',
+    arrivalRunway: '22',
+    altitude: 10000,
+  },
   routeInfo: { route: 'EGKK/26L BOGNA1X BOGNA BONEK BONEK1R LCLK/22' },
   aircraftInfo: { callsign: 'AAL213' },
   active: true,
@@ -14,12 +28,20 @@ const plan = {
 
 describe('PFTracker import', () => {
   it('only imports when the pilot says yes', () => {
-    expect(wantsPfTrackerImport({ 'Import my PFTracker flight plan?': 'Yes, use my PFTracker plan' })).toBe(true);
-    expect(wantsPfTrackerImport({ 'Import my PFTracker flight plan?': 'No, I will fill it in' })).toBe(false);
+    expect(
+      wantsPfTrackerImport({
+        'Import my PFTracker flight plan?': 'Yes, use my PFTracker plan',
+      })
+    ).toBe(true);
+    expect(
+      wantsPfTrackerImport({
+        'Import my PFTracker flight plan?': 'No, I will fill it in',
+      })
+    ).toBe(false);
     expect(wantsPfTrackerImport({ Callsign: 'BAW1' })).toBe(false);
   });
 
-  it('turns a plan into a strip, with the pilot\'s own answers winning', () => {
+  it("turns a plan into a strip, with the pilot's own answers winning", () => {
     const own = withoutImportQuestion({
       'Import my PFTracker flight plan?': 'Yes',
       'Roblox username': 'Indian_GamerTamilan',

@@ -78,13 +78,17 @@ router.post(
       if (radar && !isAdmin(createdBy)) {
         const roles = await getUserRoles(createdBy);
         const allowed = roles.some((r) => {
-          const p = typeof r.permissions === 'string' ? JSON.parse(r.permissions) : r.permissions;
+          const p =
+            typeof r.permissions === 'string'
+              ? JSON.parse(r.permissions)
+              : r.permissions;
           return p?.pf_radar === true;
         });
         if (!allowed) {
           return res.status(403).json({
             error: 'Not allowed',
-            message: 'PF Radar sessions are only for controllers an admin has given PF Radar access.',
+            message:
+              'PF Radar sessions are only for controllers an admin has given PF Radar access.',
           });
         }
       }

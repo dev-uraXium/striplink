@@ -51,7 +51,8 @@ export default function ATIS({
   onAtisUpdate,
   sessionUsers = [],
 }: ATISProps) {
-  const { airportRunways, fetchAirportData, fetchedAirports, airports } = useData();
+  const { airportRunways, fetchAirportData, fetchedAirports, airports } =
+    useData();
   const [networkCopied, setNetworkCopied] = useState(false);
   const [formLink, setFormLink] = useState<string | null>(null);
   const [includeLinks, setIncludeLinks] = useState(true);
@@ -425,7 +426,10 @@ export default function ATIS({
             airportName: airport.name,
             controlName: airport.controlName,
             frequencies: airport.allFrequencies ?? {},
-            controllers: sessionUsers.map((u) => ({ id: u.id, position: u.position })),
+            controllers: sessionUsers.map((u) => ({
+              id: u.id,
+              position: u.position,
+            })),
             atisText,
             formLink: includeLinks ? formLink : null,
             includePfTracker: includeLinks,
@@ -529,11 +533,12 @@ export default function ATIS({
                 checked={includeLinks}
                 onCheckedChange={(checked) => setIncludeLinks(checked === true)}
               />
-              Add flight plan filing links (Google Form{formLink ? '' : ' when set up'} and PFTracker)
+              Add flight plan filing links (Google Form
+              {formLink ? '' : ' when set up'} and PFTracker)
             </label>
             <p className="mt-2 text-xs text-zinc-500">
-              Positions come from what each controller picked on the board. Pick yours in the position menu so the
-              right line mentions you.
+              Positions come from what each controller picked on the board. Pick
+              yours in the position menu so the right line mentions you.
             </p>
           </PanelSection>
         )}

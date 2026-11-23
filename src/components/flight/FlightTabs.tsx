@@ -16,7 +16,11 @@ interface FlightTabsProps {
   hidePhotos?: boolean;
 }
 
-export default function FlightTabs({ active, onChange, hidePhotos = false }: FlightTabsProps) {
+export default function FlightTabs({
+  active,
+  onChange,
+  hidePhotos = false,
+}: FlightTabsProps) {
   const tabs = hidePhotos ? TABS.filter((t) => t.key !== 'photos') : TABS;
   const activeIndex = tabs.findIndex((t) => t.key === active);
 

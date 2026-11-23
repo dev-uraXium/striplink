@@ -24,7 +24,9 @@ export async function getSupporterBadge(
   return null;
 }
 
-export async function getAvatarRing(_userId: string): Promise<AvatarRing | null> {
+export async function getAvatarRing(
+  _userId: string
+): Promise<AvatarRing | null> {
   return null;
 }
 

@@ -17,6 +17,35 @@ export interface SharedFormConfig {
   registeredAt: string;
   /** The form's questions and their entry IDs, for building fully pre-filled links. */
   fields?: SharedFormField[];
+  /** forms.gle short link to the plain form (no session), set by an admin. */
+  shortUrl?: string | null;
+}
+
+/** Only Google Forms short links (forms.gle) or docs.google.com/forms links. */
+export function validShortUrl(url: unknown): string | null {
+  if (typeof url !== 'string' || url.length > 300) return null;
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== 'https:') return null;
+    if (u.hostname === 'forms.gle' && /^\/[A-Za-z0-9]{6,40}$/.test(u.pathname))
+      return u.toString();
+    if (u.hostname === 'docs.google.com' && u.pathname.startsWith('/forms/'))
+      return u.toString();
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** The PF Radar session that takes form responses without a session: newest one opened in the last day. */
+export async function activeRadarSessionId(): Promise<string | null> {
+  const { rows } = await sql<{ session_id: string }>`
+    SELECT session_id FROM sessions
+    WHERE is_radar = true AND form_webhook_secret IS NOT NULL
+      AND created_at > now() - interval '24 hours'
+    ORDER BY created_at DESC LIMIT 1
+  `.execute(mainDb);
+  return rows[0]?.session_id ?? null;
 }
 
 export interface SharedFormField {
@@ -33,13 +62,21 @@ export function parseFormFields(raw: unknown): SharedFormField[] | undefined {
   for (const f of raw.slice(0, 40)) {
     if (!f || typeof f !== 'object') continue;
     const { title, entry, type, choices } = f as Record<string, unknown>;
-    if (typeof title !== 'string' || typeof entry !== 'string' || !/^entry\.\d{1,15}$/.test(entry)) continue;
+    if (
+      typeof title !== 'string' ||
+      typeof entry !== 'string' ||
+      !/^entry\.\d{1,15}$/.test(entry)
+    )
+      continue;
     out.push({
       title: title.slice(0, 120),
       entry,
       type: typeof type === 'string' ? type.slice(0, 32) : 'TEXT',
       choices: Array.isArray(choices)
-        ? choices.filter((c): c is string => typeof c === 'string').slice(0, 300).map((c) => c.slice(0, 120))
+        ? choices
+            .filter((c): c is string => typeof c === 'string')
+            .slice(0, 300)
+            .map((c) => c.slice(0, 120))
         : undefined,
     });
   }
@@ -75,13 +112,26 @@ function matchChoice(choices: string[], value: string) {
   const v = value.trim().toUpperCase();
   return (
     choices.find((c) => c.trim().toUpperCase() === v) ??
-    choices.find((c) => c.trim().toUpperCase().startsWith(`${v} `) || c.trim().toUpperCase().startsWith(`${v}-`))
+    choices.find(
+      (c) =>
+        c.trim().toUpperCase().startsWith(`${v} `) ||
+        c.trim().toUpperCase().startsWith(`${v}-`)
+    )
   );
 }
 
 /** Session link with as many questions pre-filled as the registered fields allow. */
-export function buildPrefilledLink(config: SharedFormConfig, sessionId: string, values: PrefillValues) {
-  const url = new URL(config.prefillTemplate.replace(SESSION_PLACEHOLDER, encodeURIComponent(sessionId)));
+export function buildPrefilledLink(
+  config: SharedFormConfig,
+  sessionId: string,
+  values: PrefillValues
+) {
+  const url = new URL(
+    config.prefillTemplate.replace(
+      SESSION_PLACEHOLDER,
+      encodeURIComponent(sessionId)
+    )
+  );
   for (const { key, titles } of PREFILL_FIELDS) {
     const value = values[key]?.trim();
     if (!value) continue;
@@ -124,13 +174,23 @@ export async function setSharedForm(config: SharedFormConfig | null) {
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
     `.execute(mainDb);
   } else {
-    await sql`DELETE FROM striplink_settings WHERE key = ${SETTINGS_KEY}`.execute(mainDb);
+    await sql`DELETE FROM striplink_settings WHERE key = ${SETTINGS_KEY}`.execute(
+      mainDb
+    );
   }
   cache = { at: Date.now(), value: config };
 }
 
-export function sharedFormLink(config: SharedFormConfig | null, sessionId: string) {
-  return config ? config.prefillTemplate.replace(SESSION_PLACEHOLDER, encodeURIComponent(sessionId)) : null;
+export function sharedFormLink(
+  config: SharedFormConfig | null,
+  sessionId: string
+) {
+  return config
+    ? config.prefillTemplate.replace(
+        SESSION_PLACEHOLDER,
+        encodeURIComponent(sessionId)
+      )
+    : null;
 }
 
 /** Valid only if it's a Google Forms pre-filled link carrying the placeholder. */
@@ -138,7 +198,8 @@ export function validPrefillTemplate(url: unknown): string | null {
   if (typeof url !== 'string' || url.length > 2000) return null;
   try {
     const u = new URL(url);
-    if (u.protocol !== 'https:' || u.hostname !== 'docs.google.com') return null;
+    if (u.protocol !== 'https:' || u.hostname !== 'docs.google.com')
+      return null;
     if (!u.pathname.startsWith('/forms/')) return null;
     return url.includes(SESSION_PLACEHOLDER) ? url : null;
   } catch {
@@ -146,11 +207,24 @@ export function validPrefillTemplate(url: unknown): string | null {
   }
 }
 
-const SESSION_TITLES = new Set(['striplink session', 'session', 'session id', 'session code', 'striplink session id']);
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const SESSION_TITLES = new Set([
+  'striplink session',
+  'session',
+  'session id',
+  'session code',
+  'striplink session id',
+]);
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 
 /** Pulls the session answer out of a shared-form response. */
-export function splitSessionAnswer(answers: FormAnswers): { sessionId: string | null; rest: FormAnswers } {
+export function splitSessionAnswer(answers: FormAnswers): {
+  sessionId: string | null;
+  rest: FormAnswers;
+} {
   let sessionId: string | null = null;
   const rest: FormAnswers = {};
   for (const [title, value] of Object.entries(answers)) {

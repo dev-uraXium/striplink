@@ -1,63 +1,63 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
-import { AlertTriangle, FolderOpen, Loader2, Plus } from "lucide-react";
-import { toast } from "sonner";
-import { useAuth } from "../hooks/auth/useAuth";
-import { createSession, fetchMySessions } from "../utils/fetch/sessions";
-import { generateRadarATIS, generateATIS } from "../utils/fetch/atis";
-import { updateTutorialStatus } from "../utils/fetch/auth";
-import { steps } from "../components/tutorial/TutorialStepsCreate";
-import { useData } from "../hooks/data/useData";
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { AlertTriangle, FolderOpen, Loader2, Plus } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuth } from '../hooks/auth/useAuth';
+import { createSession, fetchMySessions } from '../utils/fetch/sessions';
+import { generateRadarATIS, generateATIS } from '../utils/fetch/atis';
+import { updateTutorialStatus } from '../utils/fetch/auth';
+import { steps } from '../components/tutorial/TutorialStepsCreate';
+import { useData } from '../hooks/data/useData';
 import Joyride, {
   type CallBackProps,
   STATUS,
-} from "react-joyride-react19-compat";
-import { trackTutorialEvent } from "../utils/tutorialTracking";
-import Navbar from "../components/Navbar";
-import PageHero from "../components/common/PageHero";
-import AirportCombobox from "../components/dropdowns/AirportCombobox";
-import RunwaySelect from "../components/dropdowns/RunwaySelect";
-import WindDisplay from "../components/tools/WindDisplay";
-import AtisReminderModal from "../components/modals/AtisReminderModal";
-import CustomTooltip from "../components/tutorial/CustomTooltip";
-import SettingsGroup from "../components/Settings/SettingsGroup";
-import SettingsRow from "../components/Settings/SettingsRow";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { minDuration } from "@/lib/minDuration";
-import { Checkbox } from "@/components/ui/checkbox";
-import { SIGNATURE_TONES } from "@/lib/signatureTones";
+} from 'react-joyride-react19-compat';
+import { trackTutorialEvent } from '../utils/tutorialTracking';
+import Navbar from '../components/Navbar';
+import PageHero from '../components/common/PageHero';
+import AirportCombobox from '../components/dropdowns/AirportCombobox';
+import RunwaySelect from '../components/dropdowns/RunwaySelect';
+import WindDisplay from '../components/tools/WindDisplay';
+import AtisReminderModal from '../components/modals/AtisReminderModal';
+import CustomTooltip from '../components/tutorial/CustomTooltip';
+import SettingsGroup from '../components/Settings/SettingsGroup';
+import SettingsRow from '../components/Settings/SettingsRow';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { minDuration } from '@/lib/minDuration';
+import { Checkbox } from '@/components/ui/checkbox';
+import { SIGNATURE_TONES } from '@/lib/signatureTones';
 
-type NetworkSessionKind = "standard" | "pfatc" | "advanced_atc";
+type NetworkSessionKind = 'standard' | 'pfatc' | 'advanced_atc';
 
 function networkKindFromModeParam(
-  mode: string | null,
+  mode: string | null
 ): NetworkSessionKind | null {
   if (!mode) return null;
   const normalized = mode.toLowerCase();
-  if (normalized === "pfatc") return "pfatc";
+  if (normalized === 'pfatc') return 'pfatc';
   // AATC disabled — was: if (normalized === 'aatc' || normalized === 'advanced_atc') return 'advanced_atc';
   return null;
 }
 
 function initialNetworkKind(
   searchParams: URLSearchParams,
-  startTutorial: boolean,
+  startTutorial: boolean
 ): NetworkSessionKind {
-  if (startTutorial) return "pfatc";
-  return networkKindFromModeParam(searchParams.get("mode")) ?? "standard";
+  if (startTutorial) return 'pfatc';
+  return networkKindFromModeParam(searchParams.get('mode')) ?? 'standard';
 }
 
 export default function Create() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const startTutorial = searchParams.get("tutorial") === "true";
-  const [selectedAirport, setSelectedAirport] = useState<string>("");
-  const [selectedRunway, setSelectedRunway] = useState<string>("");
+  const startTutorial = searchParams.get('tutorial') === 'true';
+  const [selectedAirport, setSelectedAirport] = useState<string>('');
+  const [selectedRunway, setSelectedRunway] = useState<string>('');
   const [selectedArrivalRunway, setSelectedArrivalRunway] =
-    useState<string>("");
+    useState<string>('');
   const [networkKind, setNetworkKind] = useState<NetworkSessionKind>(() =>
-    initialNetworkKind(searchParams, startTutorial),
+    initialNetworkKind(searchParams, startTutorial)
   );
   const [isCreating, setIsCreating] = useState<boolean>(false);
   const [sessionCount, setSessionCount] = useState(0);
@@ -69,12 +69,12 @@ export default function Create() {
     sessionId: string;
     accessId: string;
     atisText: string;
-    networkSessionKind: "pfatc" | "advanced_atc";
+    networkSessionKind: 'pfatc' | 'advanced_atc';
   } | null>(null);
   const { user } = useAuth();
   // StripLink: PF Radar (whole map) needs the pf_radar permission an admin grants
   const canRadar = Boolean(
-    user?.isAdmin || user?.rolePermissions?.["pf_radar"],
+    user?.isAdmin || user?.rolePermissions?.['pf_radar']
   );
   const [isRadar, setIsRadar] = useState(false);
   const { airports, frequencies } = useData();
@@ -93,7 +93,7 @@ export default function Create() {
   }, [user, maxSessions]);
 
   const handleContinueToSession = (sessionId: string, accessId: string) => {
-    const tutorialParam = startTutorial ? "&tutorial=true" : "";
+    const tutorialParam = startTutorial ? '&tutorial=true' : '';
     navigate(`/view/${sessionId}?accessId=${accessId}${tutorialParam}`);
   };
 
@@ -101,23 +101,23 @@ export default function Create() {
     if (!selectedAirport || !selectedRunway || sessionLimitReached) return;
 
     setIsCreating(true);
-    void import("./Flights");
+    void import('./Flights');
 
     try {
       const effectiveKind: NetworkSessionKind = startTutorial
-        ? "pfatc"
+        ? 'pfatc'
         : networkKind;
       const newSession = await minDuration(
         createSession({
           airportIcao: selectedAirport,
           activeRunway: selectedRunway,
           arrivalRunway: selectedArrivalRunway || undefined,
-          isPFATC: effectiveKind === "pfatc",
+          isPFATC: effectiveKind === 'pfatc',
           isAdvancedATC: false, // AATC disabled — was: effectiveKind === 'advanced_atc'
-          createdBy: user?.userId || "unknown",
+          createdBy: user?.userId || 'unknown',
           isTutorial: startTutorial,
           isRadar: canRadar && isRadar && !startTutorial,
-        }),
+        })
       );
 
       let atisResponse = null;
@@ -129,44 +129,44 @@ export default function Create() {
 
         atisResponse =
           canRadar && isRadar && !startTutorial
-            ? await generateRadarATIS(newSession.sessionId, "A")
+            ? await generateRadarATIS(newSession.sessionId, 'A')
             : await generateATIS({
                 sessionId: newSession.sessionId,
-                ident: "A",
+                ident: 'A',
                 icao: selectedAirport,
                 landing_runways: landingRunways,
                 departing_runways: departingRunways,
               });
       } catch (atisError) {
         console.warn(
-          "Failed to generate ATIS during session creation:",
-          atisError,
+          'Failed to generate ATIS during session creation:',
+          atisError
         );
       }
 
       const showAtisReminder =
-        effectiveKind === "pfatc" && // AATC disabled — was: (effectiveKind === 'pfatc' || effectiveKind === 'advanced_atc')
+        effectiveKind === 'pfatc' && // AATC disabled — was: (effectiveKind === 'pfatc' || effectiveKind === 'advanced_atc')
         atisResponse?.atisText;
       if (showAtisReminder) {
         setCreatedSession({
           sessionId: newSession.sessionId,
           accessId: newSession.accessId,
-          atisText: atisResponse?.atisText || "",
-          networkSessionKind: "pfatc", // AATC disabled — was: effectiveKind === 'advanced_atc' ? 'advanced_atc' : 'pfatc'
+          atisText: atisResponse?.atisText || '',
+          networkSessionKind: 'pfatc', // AATC disabled — was: effectiveKind === 'advanced_atc' ? 'advanced_atc' : 'pfatc'
         });
         setShowAtisReminderModal(true);
       } else {
         handleContinueToSession(newSession.sessionId, newSession.accessId);
       }
     } catch (err) {
-      console.error("Error creating session:", err);
+      console.error('Error creating session:', err);
       const errorMessage =
-        err instanceof Error ? err.message : "Failed to create session";
+        err instanceof Error ? err.message : 'Failed to create session';
       toast.error(errorMessage);
 
       if (
-        errorMessage.includes("Session limit reached") ||
-        errorMessage.includes("limit reached")
+        errorMessage.includes('Session limit reached') ||
+        errorMessage.includes('limit reached')
       ) {
         setSessionLimitReached(true);
       }
@@ -176,7 +176,7 @@ export default function Create() {
   };
 
   const handleJoyrideCallback = (data: CallBackProps) => {
-    trackTutorialEvent("create", data);
+    trackTutorialEvent('create', data);
     const { status } = data;
     if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
       updateTutorialStatus(true);
@@ -216,7 +216,7 @@ export default function Create() {
                 <p>
                   <span className="font-medium text-amber-300">
                     Session limit reached.
-                  </span>{" "}
+                  </span>{' '}
                   <span className="text-muted-foreground">
                     Delete an old session to create a new one.
                   </span>
@@ -251,8 +251,8 @@ export default function Create() {
                       value={selectedAirport}
                       onChange={(airport) => {
                         setSelectedAirport(airport);
-                        setSelectedRunway("");
-                        setSelectedArrivalRunway("");
+                        setSelectedRunway('');
+                        setSelectedArrivalRunway('');
                       }}
                       disabled={isCreating}
                     />
@@ -285,7 +285,7 @@ export default function Create() {
                   htmlFor="create-arrival"
                   label={
                     <>
-                      Arrival runway{" "}
+                      Arrival runway{' '}
                       <span className="font-normal text-zinc-500">
                         (optional)
                       </span>
@@ -324,7 +324,7 @@ export default function Create() {
                   className="sm:items-start"
                   label={
                     <span className="block text-base leading-6">
-                      I am controlling on the{" "}
+                      I am controlling on the{' '}
                       <a
                         href="https://discord.gg/pfatc"
                         target="_blank"
@@ -336,7 +336,7 @@ export default function Create() {
                     </span>
                   }
                   description={
-                    networkKind === "pfatc" && !startTutorial ? (
+                    networkKind === 'pfatc' && !startTutorial ? (
                       <span className="text-[15px]">
                         All submitted flights will be publicly viewable on the
                         Network Overview page. Flights are shared between
@@ -348,9 +348,9 @@ export default function Create() {
                 >
                   <Checkbox
                     id="pfatc-checkbox"
-                    checked={startTutorial || networkKind === "pfatc"}
+                    checked={startTutorial || networkKind === 'pfatc'}
                     onCheckedChange={(checked) =>
-                      setNetworkKind(checked === true ? "pfatc" : "standard")
+                      setNetworkKind(checked === true ? 'pfatc' : 'standard')
                     }
                     disabled={startTutorial || isCreating}
                     className="mt-1"
@@ -403,10 +403,10 @@ export default function Create() {
             >
               {isCreating ? <Loader2 className="animate-spin" /> : <Plus />}
               {isCreating
-                ? "Creating session…"
+                ? 'Creating session…'
                 : sessionLimitReached
-                  ? "Session limit reached"
-                  : "Create session"}
+                  ? 'Session limit reached'
+                  : 'Create session'}
             </Button>
           </div>
         </form>
@@ -423,15 +423,15 @@ export default function Create() {
         tooltipComponent={CustomTooltip}
         styles={{
           options: {
-            primaryColor: "#3b82f6",
-            textColor: "#ffffff",
-            backgroundColor: "#1f2937",
+            primaryColor: '#3b82f6',
+            textColor: '#ffffff',
+            backgroundColor: '#1f2937',
             zIndex: 1000,
           },
           spotlight: {
-            border: "2px solid #fbbf24",
-            borderRadius: "24px",
-            boxShadow: "0 0 20px rgba(251, 191, 36, 0.5)",
+            border: '2px solid #fbbf24',
+            borderRadius: '24px',
+            boxShadow: '0 0 20px rgba(251, 191, 36, 0.5)',
           },
         }}
       />
@@ -443,7 +443,7 @@ export default function Create() {
             setShowAtisReminderModal(false);
             handleContinueToSession(
               createdSession.sessionId,
-              createdSession.accessId,
+              createdSession.accessId
             );
           }}
           atisText={createdSession.atisText}
@@ -462,29 +462,29 @@ export default function Create() {
           airportAppFrequency={(() => {
             const airportObj = airports.find((a) => a.icao === selectedAirport);
             const freqObj = frequencies.find((f) => f.icao === selectedAirport);
-            const order = ["APP", "TWR", "GND", "DEL"];
+            const order = ['APP', 'TWR', 'GND', 'DEL'];
             for (const key of order) {
               const fromAirport = airportObj?.allFrequencies?.[key];
               const fromFreqs = freqObj?.[key];
-              if (fromAirport && fromAirport !== "n/a") return fromAirport;
-              if (fromFreqs && fromFreqs !== "n/a") return fromFreqs;
+              if (fromAirport && fromAirport !== 'n/a') return fromAirport;
+              if (fromFreqs && fromFreqs !== 'n/a') return fromFreqs;
             }
-            return "n/a";
+            return 'n/a';
           })()}
           airportFrequencyType={(() => {
             const airportObj = airports.find((a) => a.icao === selectedAirport);
             const freqObj = frequencies.find((f) => f.icao === selectedAirport);
-            const order = ["APP", "TWR", "GND", "DEL"];
+            const order = ['APP', 'TWR', 'GND', 'DEL'];
             for (const key of order) {
               const fromAirport = airportObj?.allFrequencies?.[key];
               const fromFreqs = freqObj?.[key];
               if (
-                (fromAirport && fromAirport !== "n/a") ||
-                (fromFreqs && fromFreqs !== "n/a")
+                (fromAirport && fromAirport !== 'n/a') ||
+                (fromFreqs && fromFreqs !== 'n/a')
               )
                 return key;
             }
-            return "APP";
+            return 'APP';
           })()}
           networkSessionKind={createdSession.networkSessionKind}
         />

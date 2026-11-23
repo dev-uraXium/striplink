@@ -525,9 +525,8 @@ export default function Charts() {
     null;
   const viewerAirport = airports.find((a) => a.icao === selectedIcao) ?? null;
   const selectedChart =
-    viewerAirport?.charts.find(
-      (chart) => chartKind(chart) === selectedKind
-    ) ?? null;
+    viewerAirport?.charts.find((chart) => chartKind(chart) === selectedKind) ??
+    null;
 
   const selectAirport = (icao: string) => setSearchParams({ airport: icao });
 
@@ -559,7 +558,8 @@ export default function Charts() {
             !cephieOff && (
               <div className="flex flex-col items-center gap-3 text-center">
                 <p className="max-w-xl text-sm text-zinc-300 sm:text-base">
-                  Aerodrome charts, SIDs and STARs for Project Flight airports, from openCharts.
+                  Aerodrome charts, SIDs and STARs for Project Flight airports,
+                  from openCharts.
                 </p>
                 <div className="flex items-center gap-6">
                   <CountLabel icon={<MapPin />}>
@@ -620,7 +620,6 @@ export default function Charts() {
                 />
               </div>
             )}
-
 
             {cephieOff ? null : showSkeleton ? (
               <PageSkeleton />
@@ -705,7 +704,8 @@ export default function Charts() {
                 >
                   openCharts
                 </a>{' '}
-                by Coral Reef Studios, © uraXium. For Project Flight simulation only, not for real-world navigation.
+                by Coral Reef Studios, © uraXium. For Project Flight simulation
+                only, not for real-world navigation.
               </p>
             )}
           </div>

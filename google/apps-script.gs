@@ -29,7 +29,8 @@ function send_(payload) {
     muteHttpExceptions: true,
   });
   const code = res.getResponseCode();
-  if (code >= 300) console.error('StripLink ' + code + ': ' + res.getContentText());
+  if (code >= 300)
+    console.error('StripLink ' + code + ': ' + res.getContentText());
   else console.log('StripLink: ' + res.getContentText());
 }
 
@@ -37,8 +38,12 @@ function send_(payload) {
 function installTrigger() {
   const form = FormApp.getActiveForm();
   ScriptApp.getProjectTriggers()
-    .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
-    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+    .filter(function (t) {
+      return t.getHandlerFunction() === 'onFormSubmit';
+    })
+    .forEach(function (t) {
+      ScriptApp.deleteTrigger(t);
+    });
   ScriptApp.newTrigger('onFormSubmit').forForm(form).onFormSubmit().create();
   console.log('StripLink trigger installed for "' + form.getTitle() + '"');
 }
@@ -87,12 +92,36 @@ const PF_AIRPORTS = [
 function buildFlightPlanForm() {
   const form = FormApp.getActiveForm();
   form.addTextItem().setTitle('Roblox username').setRequired(true);
-  form.addTextItem().setTitle('Callsign').setHelpText('e.g. BAW123').setRequired(true);
-  form.addTextItem().setTitle('Aircraft').setHelpText('ICAO type, e.g. A320, B738').setRequired(true);
-  form.addMultipleChoiceItem().setTitle('Flight rules').setChoiceValues(['IFR', 'VFR']).setRequired(true);
-  form.addListItem().setTitle('Departure').setChoiceValues(PF_AIRPORTS).setRequired(true);
-  form.addListItem().setTitle('Arrival').setChoiceValues(PF_AIRPORTS).setRequired(true);
-  form.addTextItem().setTitle('Cruising level').setHelpText('e.g. 350 for FL350').setRequired(true);
+  form
+    .addTextItem()
+    .setTitle('Callsign')
+    .setHelpText('e.g. BAW123')
+    .setRequired(true);
+  form
+    .addTextItem()
+    .setTitle('Aircraft')
+    .setHelpText('ICAO type, e.g. A320, B738')
+    .setRequired(true);
+  form
+    .addMultipleChoiceItem()
+    .setTitle('Flight rules')
+    .setChoiceValues(['IFR', 'VFR'])
+    .setRequired(true);
+  form
+    .addListItem()
+    .setTitle('Departure')
+    .setChoiceValues(PF_AIRPORTS)
+    .setRequired(true);
+  form
+    .addListItem()
+    .setTitle('Arrival')
+    .setChoiceValues(PF_AIRPORTS)
+    .setRequired(true);
+  form
+    .addTextItem()
+    .setTitle('Cruising level')
+    .setHelpText('e.g. 350 for FL350')
+    .setRequired(true);
   form.addParagraphTextItem().setTitle('Route').setHelpText('DCT if direct');
   form.addTextItem().setTitle('Stand');
   form.addParagraphTextItem().setTitle('Remarks');

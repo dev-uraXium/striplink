@@ -43,6 +43,7 @@ export interface RadarAirportAtis {
   name: string;
   runway: string | null;
   text: string | null;
+  metar?: string | null;
   error?: string;
 }
 
@@ -54,7 +55,10 @@ export interface RadarAtisResponse {
 }
 
 /** StripLink PF Radar: one ATIS per airport. */
-export async function generateRadarATIS(sessionId: string, ident: string): Promise<RadarAtisResponse> {
+export async function generateRadarATIS(
+  sessionId: string,
+  ident: string
+): Promise<RadarAtisResponse> {
   const response = await apiFetch(`${API_BASE_URL}/api/atis/generate-radar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

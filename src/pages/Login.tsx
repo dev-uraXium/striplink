@@ -141,7 +141,9 @@ export default function Login() {
               onSubmit={(e) => {
                 e.preventDefault();
                 const name = new FormData(e.currentTarget).get('devName');
-                const url = new URL(`${import.meta.env.VITE_SERVER_URL}/api/auth/dev-login`);
+                const url = new URL(
+                  `${import.meta.env.VITE_SERVER_URL}/api/auth/dev-login`
+                );
                 url.searchParams.set('username', String(name || 'dev'));
                 if (callback) url.searchParams.set('callback', callback);
                 window.location.href = url.toString();
@@ -152,7 +154,11 @@ export default function Login() {
                 placeholder="Dev username (local only)"
                 className="h-10 flex-1 rounded-full border-2 border-yellow-600/60 bg-zinc-900 px-4 text-sm outline-none focus:border-yellow-500"
               />
-              <Button type="submit" variant="ghost" className="h-10 border-2 border-yellow-600/60 text-yellow-400">
+              <Button
+                type="submit"
+                variant="ghost"
+                className="h-10 border-2 border-yellow-600/60 text-yellow-400"
+              >
                 Dev login
               </Button>
             </form>
@@ -176,7 +182,12 @@ export default function Login() {
                   .map((l, i, arr) => (
                     <span key={l.label}>
                       {i > 0 && (i === arr.length - 1 ? ' and ' : ', ')}
-                      <Link to={l.href} target="_blank" rel="noreferrer" className={LEGAL_LINK_CLASS}>
+                      <Link
+                        to={l.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={LEGAL_LINK_CLASS}
+                      >
                         {l.label}
                       </Link>
                     </span>

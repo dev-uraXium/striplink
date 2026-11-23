@@ -58,10 +58,7 @@ export default function CanaryModal({
       icon={<AlertTriangle className="h-5 w-5" />}
       footer={
         <div className="flex justify-between space-x-3 w-full">
-          <Button
-            size="sm"
-            onClick={() => (window.location.href = '/')}
-          >
+          <Button size="sm" onClick={() => (window.location.href = '/')}>
             Go to Stable Version
           </Button>
           <Button

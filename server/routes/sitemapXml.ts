@@ -9,7 +9,10 @@ const router = express.Router();
 // its own domain into a sitemap — every environment always points crawlers
 // at the same canonical production URLs, matching astro.config.mjs's SITE
 // constant and robots.txt.
-const SITE = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+const SITE = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(
+  /\/+$/,
+  ''
+);
 
 function xmlEscape(value: string): string {
   return value

@@ -49,22 +49,56 @@ const resourceLinks: FooterLink[] = [
   { href: '/glossary', label: 'Glossary', icon: BookA },
   { href: '/pftracker', label: 'PFTracker → StripLink', icon: BookOpen },
   ...(BRAND.supportEmail
-    ? [{ href: `mailto:${BRAND.supportEmail}`, label: BRAND.supportEmail, icon: Mail }]
+    ? [
+        {
+          href: `mailto:${BRAND.supportEmail}`,
+          label: BRAND.supportEmail,
+          icon: Mail,
+        },
+      ]
     : []),
   ...(BRAND.discordUrl
-    ? [{ href: BRAND.discordUrl, label: 'Join our Discord', icon: FaDiscord, external: true }]
+    ? [
+        {
+          href: BRAND.discordUrl,
+          label: 'Join our Discord',
+          icon: FaDiscord,
+          external: true,
+        },
+      ]
     : []),
 ];
 
 const legalLinks: FooterLink[] = [
   ...(BRAND.termsUrl
-    ? [{ href: BRAND.termsUrl, label: 'Terms of Use', external: /^https?:/.test(BRAND.termsUrl), icon: ScrollText }]
+    ? [
+        {
+          href: BRAND.termsUrl,
+          label: 'Terms of Use',
+          external: /^https?:/.test(BRAND.termsUrl),
+          icon: ScrollText,
+        },
+      ]
     : []),
   ...(BRAND.privacyUrl
-    ? [{ href: BRAND.privacyUrl, label: 'Privacy Policy', external: /^https?:/.test(BRAND.privacyUrl), icon: Shield }]
+    ? [
+        {
+          href: BRAND.privacyUrl,
+          label: 'Privacy Policy',
+          external: /^https?:/.test(BRAND.privacyUrl),
+          icon: Shield,
+        },
+      ]
     : []),
   ...(BRAND.cookiesUrl
-    ? [{ href: BRAND.cookiesUrl, label: 'Cookies Policy', external: /^https?:/.test(BRAND.cookiesUrl), icon: Cookie }]
+    ? [
+        {
+          href: BRAND.cookiesUrl,
+          label: 'Cookies Policy',
+          external: /^https?:/.test(BRAND.cookiesUrl),
+          icon: Cookie,
+        },
+      ]
     : []),
 ];
 
@@ -179,7 +213,9 @@ export default function Footer() {
         <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
           <LinkColumn title="Product" links={navLinks} />
           <LinkColumn title="Resources" links={resourceLinks} />
-          {legalLinks.length > 0 && <LinkColumn title="Legal" links={legalLinks} />}
+          {legalLinks.length > 0 && (
+            <LinkColumn title="Legal" links={legalLinks} />
+          )}
           <div className="flex flex-col gap-5">
             {socialLinks.length > 0 && (
               <h3 className="text-base font-semibold text-white">Follow</h3>
@@ -224,7 +260,8 @@ export default function Footer() {
                 &copy; {year} StripLink
                 {BRAND.owner && (
                   <>
-                    {' '}by{' '}
+                    {' '}
+                    by{' '}
                     {BRAND.ownerUrl ? (
                       <Credit href={BRAND.ownerUrl}>{BRAND.owner}</Credit>
                     ) : (

@@ -1,14 +1,14 @@
-import "./loadIslandStyles";
-import { AuthProvider } from "../hooks/auth/AuthProvider";
-import { DataProvider } from "../hooks/data/DataProvider";
-import { SettingsProvider } from "../hooks/settings/SettingsProvider";
-import { Toaster } from "../components/ui/sonner";
-import Navbar from "../components/Navbar";
-import AppOverlays from "../components/AppOverlays";
-import PilotProfile from "../pages/PilotProfile";
-import { PostHogProviderWrapper } from "./PostHogProviderWrapper";
-import { IsomorphicRouter } from "./IsomorphicRouter";
-import type { PilotProfile as PilotProfileType } from "../types/pilot";
+import './loadIslandStyles';
+import { AuthProvider } from '../hooks/auth/AuthProvider';
+import { DataProvider } from '../hooks/data/DataProvider';
+import { SettingsProvider } from '../hooks/settings/SettingsProvider';
+import { Toaster } from '../components/ui/sonner';
+import Navbar from '../components/Navbar';
+import AppOverlays from '../components/AppOverlays';
+import PilotProfile from '../pages/PilotProfile';
+import { PostHogProviderWrapper } from './PostHogProviderWrapper';
+import { IsomorphicRouter } from './IsomorphicRouter';
+import type { PilotProfile as PilotProfileType } from '../types/pilot';
 
 interface Props {
   username: string;

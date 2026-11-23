@@ -7,12 +7,18 @@ export const KNOWN_DEPLOYMENT_CHANNELS = ['production', 'canary'];
 export function isProductionHost(host: string): boolean {
   let configured = '';
   try {
-    configured = process.env.FRONTEND_URL ? new URL(process.env.FRONTEND_URL).hostname.toLowerCase() : '';
+    configured = process.env.FRONTEND_URL
+      ? new URL(process.env.FRONTEND_URL).hostname.toLowerCase()
+      : '';
   } catch {
     configured = '';
   }
   const h = host.split(',')[0].trim().toLowerCase().split(':')[0];
-  return Boolean(configured) && process.env.NODE_ENV === 'production' && (h === configured || h === `www.${configured}`);
+  return (
+    Boolean(configured) &&
+    process.env.NODE_ENV === 'production' &&
+    (h === configured || h === `www.${configured}`)
+  );
 }
 
 export function resolveChannelFromHostname(host: string): string {

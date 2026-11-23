@@ -26,7 +26,9 @@ function loadCredentials(): Credentials | null {
         : '');
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<Credentials>;
-    return parsed.client_email && parsed.private_key ? (parsed as Credentials) : null;
+    return parsed.client_email && parsed.private_key
+      ? (parsed as Credentials)
+      : null;
   } catch (err) {
     console.error('[forms-api] could not read service account:', err);
     return null;
@@ -42,7 +44,10 @@ export function formsPollerInfo() {
 }
 
 const QUESTION_TTL_MS = 5 * 60 * 1000;
-const questionMaps = new Map<string, { at: number; map: Record<string, string> }>();
+const questionMaps = new Map<
+  string,
+  { at: number; map: Record<string, string> }
+>();
 const backoffUntil = new Map<string, number>();
 
 async function questionMap(client: forms_v1.Forms, formId: string) {
@@ -54,14 +59,19 @@ async function questionMap(client: forms_v1.Forms, formId: string) {
     const q = item.questionItem?.question;
     if (q?.questionId) map[q.questionId] = item.title || q.questionId;
     for (const gq of item.questionGroupItem?.questions ?? []) {
-      if (gq.questionId) map[gq.questionId] = `${item.title ?? ''} ${gq.rowQuestion?.title ?? ''}`.trim();
+      if (gq.questionId)
+        map[gq.questionId] =
+          `${item.title ?? ''} ${gq.rowQuestion?.title ?? ''}`.trim();
     }
   }
   questionMaps.set(formId, { at: Date.now(), map });
   return map;
 }
 
-function toAnswers(r: forms_v1.Schema$FormResponse, map: Record<string, string>): FormAnswers {
+function toAnswers(
+  r: forms_v1.Schema$FormResponse,
+  map: Record<string, string>
+): FormAnswers {
   const answers: FormAnswers = {};
   for (const [qid, ans] of Object.entries(r.answers ?? {})) {
     const values = (ans.textAnswers?.answers ?? []).map((a) => a.value ?? '');
@@ -70,7 +80,11 @@ function toAnswers(r: forms_v1.Schema$FormResponse, map: Record<string, string>)
   return answers;
 }
 
-async function pollForm(client: forms_v1.Forms, formId: string, sessionIds: string[]) {
+async function pollForm(
+  client: forms_v1.Forms,
+  formId: string,
+  sessionIds: string[]
+) {
   const cursorKey = prefixKey(`forms:cursor:${formId}`);
   const cursor = await redisConnection.get(cursorKey);
   if (!cursor) {
@@ -91,7 +105,10 @@ async function pollForm(client: forms_v1.Forms, formId: string, sessionIds: stri
       const answers = toAnswers(r, map);
       for (const sessionId of sessionIds) {
         await fileFormResponse(sessionId, answers, r.responseId).catch((err) =>
-          console.warn(`[forms-api] ${formId} -> ${sessionId}:`, err instanceof Error ? err.message : err)
+          console.warn(
+            `[forms-api] ${formId} -> ${sessionId}:`,
+            err instanceof Error ? err.message : err
+          )
         );
       }
       const t = r.lastSubmittedTime || r.createTime;
@@ -112,7 +129,8 @@ export function startFormsPoller() {
     ],
   });
   const client = formsApi({ version: 'v1', auth });
-  const intervalMs = Math.max(10, Number(process.env.FORMS_POLL_INTERVAL) || 20) * 1000;
+  const intervalMs =
+    Math.max(10, Number(process.env.FORMS_POLL_INTERVAL) || 20) * 1000;
 
   let running = false;
   const tick = async () => {
@@ -128,7 +146,10 @@ export function startFormsPoller() {
       const byForm = new Map<string, string[]>();
       for (const r of rows) {
         if (!r.google_form_id) continue;
-        byForm.set(r.google_form_id, [...(byForm.get(r.google_form_id) ?? []), r.session_id]);
+        byForm.set(r.google_form_id, [
+          ...(byForm.get(r.google_form_id) ?? []),
+          r.session_id,
+        ]);
       }
       for (const [formId, sessionIds] of byForm) {
         if ((backoffUntil.get(formId) ?? 0) > Date.now()) continue;
@@ -137,7 +158,8 @@ export function startFormsPoller() {
         } catch (err) {
           const e = err as { code?: number; message?: string };
           // Not shared with the service account / deleted form: back off for 5 minutes
-          if (e.code === 403 || e.code === 404) backoffUntil.set(formId, Date.now() + 5 * 60 * 1000);
+          if (e.code === 403 || e.code === 404)
+            backoffUntil.set(formId, Date.now() + 5 * 60 * 1000);
           console.warn(`[forms-api] ${formId}:`, e.message ?? err);
         }
       }
@@ -148,7 +170,9 @@ export function startFormsPoller() {
     }
   };
 
-  console.log(`[forms-api] polling linked Google Forms every ${intervalMs / 1000}s as ${credentials.client_email}`);
+  console.log(
+    `[forms-api] polling linked Google Forms every ${intervalMs / 1000}s as ${credentials.client_email}`
+  );
   void tick();
   setInterval(tick, intervalMs);
 }

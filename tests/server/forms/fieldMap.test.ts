@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { answersToFlight, fieldForTitle, normalizeLevel } from '../../../server/forms/fieldMap';
+import {
+  answersToFlight,
+  fieldForTitle,
+  normalizeLevel,
+} from '../../../server/forms/fieldMap';
 
 describe('fieldForTitle', () => {
   it('matches titles loosely', () => {
@@ -49,7 +53,11 @@ describe('answersToFlight', () => {
   });
 
   it('only outputs whitelisted fields', () => {
-    const { flight } = answersToFlight({ Callsign: 'A1', user_id: 'evil', is_admin: 'true' } as never);
+    const { flight } = answersToFlight({
+      Callsign: 'A1',
+      user_id: 'evil',
+      is_admin: 'true',
+    } as never);
     expect(Object.keys(flight).sort()).toEqual(
       ['callsign', 'flight_type', 'remark', 'status', 'submitted_via'].sort()
     );

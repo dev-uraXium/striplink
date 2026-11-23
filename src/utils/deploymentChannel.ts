@@ -8,7 +8,9 @@ export function resolveChannelFromHostname(
   // StripLink: production is the host the API lives on (VITE_SERVER_URL)
   let productionHost = '';
   try {
-    productionHost = new URL(import.meta.env.VITE_SERVER_URL ?? '').hostname.toLowerCase();
+    productionHost = new URL(
+      import.meta.env.VITE_SERVER_URL ?? ''
+    ).hostname.toLowerCase();
   } catch {
     productionHost = '';
   }

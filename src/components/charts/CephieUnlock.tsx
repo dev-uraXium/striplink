@@ -22,8 +22,8 @@ export function CephieUnlockStrip({
       )}
     >
       <p className="text-sm text-zinc-300">
-        <span className="font-medium text-white">{label}</span>. Log in to
-        open the full-size charts.
+        <span className="font-medium text-white">{label}</span>. Log in to open
+        the full-size charts.
       </p>
       <div className="flex items-center justify-between gap-3">
         <Button size="sm" asChild>

@@ -34,17 +34,24 @@ export async function submitFlightAndBroadcast(
   broadcastFlightEvent(sessionId, 'flightAdded', sanitizedFlight);
 
   const session = await getSessionById(sessionId);
-  const acarsRedirectUrl = await resolveExternalAcarsRedirectUrl(session, flight);
+  const acarsRedirectUrl = await resolveExternalAcarsRedirectUrl(
+    session,
+    flight
+  );
 
   if (session) {
     if (session.created_by) {
-      redisConnection.del(keys.userSessions(session.created_by)).catch(() => {});
+      redisConnection
+        .del(keys.userSessions(session.created_by))
+        .catch(() => {});
     }
-    broadcastToArrivalSessions(flight, getNetworkKind(session), sessionId).catch(
-      (err) => {
-        console.error('Failed to broadcast to arrival sessions:', err);
-      }
-    );
+    broadcastToArrivalSessions(
+      flight,
+      getNetworkKind(session),
+      sessionId
+    ).catch((err) => {
+      console.error('Failed to broadcast to arrival sessions:', err);
+    });
   }
 
   return { flight, acarsRedirectUrl };

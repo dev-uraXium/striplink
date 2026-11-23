@@ -19,12 +19,16 @@ import {
 import Button from '../common/Button';
 import { useData } from '../../hooks/data/useData';
 import { useAuth } from '../../hooks/auth/useAuth';
-import { buildAppsScript, buildSharedAppsScript } from '../../lib/formsAppsScript';
+import {
+  buildAppsScript,
+  buildSharedAppsScript,
+} from '../../lib/formsAppsScript';
 import {
   disableFormIntake,
   enableFormIntake,
   fetchFormSettings,
   fetchSharedFormSetup,
+  saveSharedShortLink,
   rotateFormSecret,
   sendTestFormFlight,
   setGoogleFormId,
@@ -42,10 +46,26 @@ interface Props {
 const RECOGNISED =
   'Callsign, Aircraft, Flight rules, Departure, Arrival, Cruising level, Route, Stand, Gate, Remarks, Roblox username, Pilot';
 
-export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIcao }: Props) {
+export default function GoogleFormModal({
+  isOpen,
+  onClose,
+  sessionId,
+  airportIcao,
+}: Props) {
   const { airports } = useData();
   const { user } = useAuth();
   const [sharedSetup, setSharedSetup] = useState<SharedFormSetup | null>(null);
+  const [shortDraft, setShortDraft] = useState<string | null>(null);
+  const saveShort = async () => {
+    try {
+      const saved = await saveSharedShortLink(shortDraft?.trim() || null);
+      setSharedSetup((prev) => (prev ? { ...prev, shortUrl: saved } : prev));
+      setShortDraft(null);
+      toast.success(saved ? 'Short link saved' : 'Short link removed');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save');
+    }
+  };
   const [settings, setSettings] = useState<FormSettings | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -81,7 +101,11 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
 
   if (!isOpen) return null;
 
-  const run = async (label: string, fn: () => Promise<FormSettings | void>, done?: string) => {
+  const run = async (
+    label: string,
+    fn: () => Promise<FormSettings | void>,
+    done?: string
+  ) => {
     setBusy(label);
     try {
       const next = await fn();
@@ -114,16 +138,32 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
       .catch((e: Error) => toast.error(e.message));
   };
 
-  const isLocal = settings ? /\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(settings.webhookUrl) : false;
-  const script = settings?.secret ? buildAppsScript(settings.webhookUrl, settings.secret, airportList) : '';
+  const isLocal = settings
+    ? /\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(settings.webhookUrl)
+    : false;
+  const script = settings?.secret
+    ? buildAppsScript(settings.webhookUrl, settings.secret, airportList)
+    : '';
 
-  const CopyButton = ({ id, text, label }: { id: string; text: string; label?: string }) => (
+  const CopyButton = ({
+    id,
+    text,
+    label,
+  }: {
+    id: string;
+    text: string;
+    label?: string;
+  }) => (
     <button
       type="button"
       onClick={() => copy(id, text)}
       className="inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 border-blue-600 px-3 py-1 text-xs font-semibold text-blue-300 transition-colors hover:bg-blue-600 hover:text-white"
     >
-      {copied === id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied === id ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
       {copied === id ? 'Copied' : (label ?? 'Copy')}
     </button>
   );
@@ -145,7 +185,10 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
               <ClipboardList className="h-5 w-5 text-blue-400" />
             </div>
             <div>
-              <h2 id="google-form-title" className="text-xl font-bold text-white">
+              <h2
+                id="google-form-title"
+                className="text-xl font-bold text-white"
+              >
                 Google Form
               </h2>
               <p className="text-sm text-zinc-400">
@@ -165,7 +208,9 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
         <div className="space-y-6 p-6 text-sm text-zinc-300">
           {error && (
             <p className="rounded-2xl border border-red-600/40 bg-red-600/10 p-4 text-red-300">
-              {error.includes('owner') ? 'Only the session owner can set up a Google Form.' : error}
+              {error.includes('owner')
+                ? 'Only the session owner can set up a Google Form.'
+                : error}
             </p>
           )}
 
@@ -178,18 +223,27 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
           {settings && !settings.enabled && (
             <div className="space-y-4">
               <p>
-                Let pilots file through a Google Form instead of (or as well as) the submit link. Every response
-                lands here as a pending strip, with the squawk, runway and SID filled in like a normal submission.
-                {' '}
+                Let pilots file through a Google Form instead of (or as well as)
+                the submit link. Every response lands here as a pending strip,
+                with the squawk, runway and SID filled in like a normal
+                submission.{' '}
                 {settings.sharedFormUrl
                   ? 'Turn it on to get a ready-made form link for this session, or connect your own form.'
                   : 'Turning this on gives the session a private webhook for a short script you paste into your form.'}
               </p>
               <Button
-                onClick={() => run('enable', () => enableFormIntake(sessionId), 'Google Form intake is on')}
+                onClick={() =>
+                  run(
+                    'enable',
+                    () => enableFormIntake(sessionId),
+                    'Google Form intake is on'
+                  )
+                }
                 disabled={busy !== null}
               >
-                {busy === 'enable' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {busy === 'enable' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
                 Turn on Google Form intake
               </Button>
             </div>
@@ -201,9 +255,10 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                 <div className="flex gap-3 rounded-2xl border border-yellow-600/40 bg-yellow-600/10 p-4 text-yellow-200">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <p>
-                    This StripLink runs on your own computer, which Google can't reach. Real form responses only
-                    arrive once StripLink is hosted (or behind a tunnel). <b>Send a test flight</b> below works
-                    locally.
+                    This StripLink runs on your own computer, which Google can't
+                    reach. Real form responses only arrive once StripLink is
+                    hosted (or behind a tunnel). <b>Send a test flight</b> below
+                    works locally.
                   </p>
                 </div>
               )}
@@ -215,12 +270,19 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                     Pilot link
                   </div>
                   <p className="text-zinc-300">
-                    Share this with pilots. It opens the StripLink flight plan form with this session already
-                    filled in, so responses land straight on this board. Nothing to set up.
+                    Share this with pilots. It opens the StripLink flight plan
+                    form with this session already filled in, so responses land
+                    straight on this board. Nothing to set up.
                   </p>
                   <p className="text-xs text-zinc-400">
-                    Pilots who file on PFTracker can copy their plan straight into the form with the{' '}
-                    <a href="/pftracker" target="_blank" rel="noreferrer" className="text-blue-300 underline">
+                    Pilots who file on PFTracker can copy their plan straight
+                    into the form with the{' '}
+                    <a
+                      href="/pftracker"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-300 underline"
+                    >
                       Send to StripLink button
                     </a>
                     .
@@ -229,7 +291,11 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                     <code className="min-w-0 flex-1 truncate rounded-full bg-black/40 px-3 py-1.5 font-mono text-xs text-zinc-200">
                       {settings.sharedFormUrl}
                     </code>
-                    <CopyButton id="shared" text={settings.sharedFormUrl} label="Copy link" />
+                    <CopyButton
+                      id="shared"
+                      text={settings.sharedFormUrl}
+                      label="Copy link"
+                    />
                     <a
                       href={settings.sharedFormUrl}
                       target="_blank"
@@ -242,95 +308,122 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                 </div>
               )}
 
-              <details open={!settings.sharedFormUrl} className="group space-y-4">
+              <details
+                open={!settings.sharedFormUrl}
+                className="group space-y-4"
+              >
                 <summary className="cursor-pointer select-none font-semibold text-white">
-                  {settings.sharedFormUrl ? 'Use your own Google Form instead' : 'Connect your Google Form'}
+                  {settings.sharedFormUrl
+                    ? 'Use your own Google Form instead'
+                    : 'Connect your Google Form'}
                 </summary>
-              <ol className="mt-4 space-y-4">
-                <li className="flex gap-3">
-                  <Step n={1} />
-                  <div className="flex-1 space-y-2">
-                    <p>
-                      Open your form in Google Forms, then <b className="text-white">⋮ → Apps Script</b>. Replace
-                      the code there with this script (it already contains this session's link and secret):
+                <ol className="mt-4 space-y-4">
+                  <li className="flex gap-3">
+                    <Step n={1} />
+                    <div className="flex-1 space-y-2">
+                      <p>
+                        Open your form in Google Forms, then{' '}
+                        <b className="text-white">⋮ → Apps Script</b>. Replace
+                        the code there with this script (it already contains
+                        this session's link and secret):
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CopyButton
+                          id="script"
+                          text={script}
+                          label="Copy Apps Script"
+                        />
+                        <span className="text-xs text-zinc-500">
+                          Keep it private, the secret lets anyone file flights
+                          here.
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                  <li className="flex gap-3">
+                    <Step n={2} />
+                    <p className="flex-1">
+                      Optional, on an empty form: run{' '}
+                      <Code>buildFlightPlanForm</Code> to add the questions with
+                      airport dropdowns.
                     </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CopyButton id="script" text={script} label="Copy Apps Script" />
-                      <span className="text-xs text-zinc-500">Keep it private, the secret lets anyone file flights here.</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <Step n={3} />
+                    <p className="flex-1">
+                      Run <Code>installTrigger</Code> once and approve Google's
+                      permission prompt. Then run <Code>sendTestFlight</Code>; a
+                      TEST strip should appear here.
+                    </p>
+                  </li>
+                </ol>
+
+                <div className="space-y-2 rounded-2xl border border-zinc-800 bg-black/30 p-4">
+                  <Row label="Webhook URL">
+                    <code className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-200">
+                      {settings.webhookUrl}
+                    </code>
+                    <CopyButton id="url" text={settings.webhookUrl} />
+                  </Row>
+                  <Row label="Secret">
+                    <code className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-200">
+                      {showSecret ? settings.secret : '•'.repeat(24)}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => setShowSecret((v) => !v)}
+                      aria-label={showSecret ? 'Hide secret' : 'Show secret'}
+                      className="rounded-full p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                    >
+                      {showSecret ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                    <CopyButton id="secret" text={settings.secret} />
+                  </Row>
+                  <p className="pt-1 text-xs text-zinc-500">
+                    Recognised question titles: {RECOGNISED}. Anything else is
+                    added to the strip's remarks.
+                  </p>
+                </div>
+
+                {settings.poller.available && (
+                  <div className="space-y-2 rounded-2xl border border-zinc-800 p-4">
+                    <p className="font-semibold text-white">
+                      Can't add a script to the form?
+                    </p>
+                    <p className="text-zinc-400">
+                      Share the form with{' '}
+                      <Code>{settings.poller.serviceAccountEmail}</Code> (as
+                      editor) and paste its editor link below. StripLink will
+                      check it for new responses every few seconds.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        value={formIdInput}
+                        onChange={(e) => setFormIdInput(e.target.value)}
+                        placeholder="https://docs.google.com/forms/d/…/edit"
+                        className="min-w-0 flex-1 rounded-full border-2 border-blue-600 bg-gray-800 px-4 py-1.5 text-white outline-none focus:border-blue-400"
+                      />
+                      <Button
+                        size="sm"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          run(
+                            'link',
+                            () =>
+                              setGoogleFormId(sessionId, formIdInput.trim()),
+                            formIdInput.trim() ? 'Form linked' : 'Form unlinked'
+                          )
+                        }
+                      >
+                        {formIdInput.trim() ? 'Link form' : 'Unlink'}
+                      </Button>
                     </div>
                   </div>
-                </li>
-                <li className="flex gap-3">
-                  <Step n={2} />
-                  <p className="flex-1">
-                    Optional, on an empty form: run <Code>buildFlightPlanForm</Code> to add the questions with
-                    airport dropdowns.
-                  </p>
-                </li>
-                <li className="flex gap-3">
-                  <Step n={3} />
-                  <p className="flex-1">
-                    Run <Code>installTrigger</Code> once and approve Google's permission prompt. Then run{' '}
-                    <Code>sendTestFlight</Code>; a TEST strip should appear here.
-                  </p>
-                </li>
-              </ol>
-
-              <div className="space-y-2 rounded-2xl border border-zinc-800 bg-black/30 p-4">
-                <Row label="Webhook URL">
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-200">{settings.webhookUrl}</code>
-                  <CopyButton id="url" text={settings.webhookUrl} />
-                </Row>
-                <Row label="Secret">
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-200">
-                    {showSecret ? settings.secret : '•'.repeat(24)}
-                  </code>
-                  <button
-                    type="button"
-                    onClick={() => setShowSecret((v) => !v)}
-                    aria-label={showSecret ? 'Hide secret' : 'Show secret'}
-                    className="rounded-full p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                  >
-                    {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                  <CopyButton id="secret" text={settings.secret} />
-                </Row>
-                <p className="pt-1 text-xs text-zinc-500">
-                  Recognised question titles: {RECOGNISED}. Anything else is added to the strip's remarks.
-                </p>
-              </div>
-
-              {settings.poller.available && (
-                <div className="space-y-2 rounded-2xl border border-zinc-800 p-4">
-                  <p className="font-semibold text-white">Can't add a script to the form?</p>
-                  <p className="text-zinc-400">
-                    Share the form with <Code>{settings.poller.serviceAccountEmail}</Code> (as editor) and paste
-                    its editor link below. StripLink will check it for new responses every few seconds.
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      value={formIdInput}
-                      onChange={(e) => setFormIdInput(e.target.value)}
-                      placeholder="https://docs.google.com/forms/d/…/edit"
-                      className="min-w-0 flex-1 rounded-full border-2 border-blue-600 bg-gray-800 px-4 py-1.5 text-white outline-none focus:border-blue-400"
-                    />
-                    <Button
-                      size="sm"
-                      disabled={busy !== null}
-                      onClick={() =>
-                        run(
-                          'link',
-                          () => setGoogleFormId(sessionId, formIdInput.trim()),
-                          formIdInput.trim() ? 'Form linked' : 'Form unlinked'
-                        )
-                      }
-                    >
-                      {formIdInput.trim() ? 'Link form' : 'Unlink'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
+                )}
               </details>
 
               <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-5">
@@ -344,7 +437,11 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                     })
                   }
                 >
-                  {busy === 'test' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {busy === 'test' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                   Send a test flight
                 </Button>
                 <span className="flex-1" />
@@ -355,16 +452,28 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                   onClick={() => {
                     if (!confirmReset) return setConfirmReset(true);
                     setConfirmReset(false);
-                    void run('rotate', () => rotateFormSecret(sessionId), 'New secret made, paste the script again');
+                    void run(
+                      'rotate',
+                      () => rotateFormSecret(sessionId),
+                      'New secret made, paste the script again'
+                    );
                   }}
                 >
-                  {confirmReset ? 'Click again: the old script will stop working' : 'Reset secret'}
+                  {confirmReset
+                    ? 'Click again: the old script will stop working'
+                    : 'Reset secret'}
                 </Button>
                 <Button
                   size="sm"
                   variant="danger"
                   disabled={busy !== null}
-                  onClick={() => run('disable', () => disableFormIntake(sessionId), 'Google Form intake is off')}
+                  onClick={() =>
+                    run(
+                      'disable',
+                      () => disableFormIntake(sessionId),
+                      'Google Form intake is off'
+                    )
+                  }
                 >
                   Turn off
                 </Button>
@@ -375,7 +484,10 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
           {user?.isAdmin && (
             <details
               className="rounded-2xl border border-zinc-800 p-4"
-              onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && loadSharedSetup()}
+              onToggle={(e) =>
+                (e.currentTarget as HTMLDetailsElement).open &&
+                loadSharedSetup()
+              }
             >
               <summary className="flex cursor-pointer select-none items-center gap-2 font-semibold text-white">
                 <ShieldCheck className="h-4 w-4 text-blue-300" />
@@ -392,7 +504,12 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                       <>
                         Every session hands out{' '}
                         {sharedSetup.editUrl ? (
-                          <a href={sharedSetup.editUrl} target="_blank" rel="noreferrer" className="text-blue-300 underline">
+                          <a
+                            href={sharedSetup.editUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-300 underline"
+                          >
                             {sharedSetup.title ?? 'the shared form'}
                           </a>
                         ) : (
@@ -406,8 +523,14 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                   </p>
                   <ol className="list-decimal space-y-1 pl-5 text-zinc-400">
                     <li>Create an empty Google Form, then ⋮ → Apps Script.</li>
-                    <li>Paste this script and run <Code>setupStripLinkForm</Code> once (approve the prompt).</li>
-                    <li>Reopen this panel: the pilot link shows up for every session with intake on.</li>
+                    <li>
+                      Paste this script and run <Code>setupStripLinkForm</Code>{' '}
+                      once (approve the prompt).
+                    </li>
+                    <li>
+                      Reopen this panel: the pilot link shows up for every
+                      session with intake on.
+                    </li>
                   </ol>
                   <CopyButton
                     id="shared-script"
@@ -419,6 +542,31 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                       airportList
                     )}
                   />
+                  {sharedSetup.configured && (
+                    <div className="space-y-2 border-t border-zinc-800 pt-3">
+                      <p className="text-zinc-300">
+                        Short link (forms.gle) for PF Radar posts. Responses
+                        from the plain short link go to the open PF Radar
+                        session.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          value={shortDraft ?? sharedSetup.shortUrl ?? ''}
+                          onChange={(e) => setShortDraft(e.target.value)}
+                          placeholder="https://forms.gle/..."
+                          className="min-w-0 flex-1 rounded-full border-2 border-zinc-700 bg-black px-3 py-1.5 font-mono text-xs text-zinc-200 outline-none focus:border-blue-600"
+                        />
+                        <button
+                          type="button"
+                          onClick={saveShort}
+                          disabled={shortDraft === null}
+                          className="rounded-full bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </details>
@@ -438,13 +586,25 @@ function Step({ n }: { n: number }) {
 }
 
 function Code({ children }: { children: React.ReactNode }) {
-  return <code className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-blue-200">{children}</code>;
+  return (
+    <code className="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-xs text-blue-200">
+      {children}
+    </code>
+  );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-24 shrink-0 text-xs font-medium text-zinc-500">{label}</span>
+      <span className="w-24 shrink-0 text-xs font-medium text-zinc-500">
+        {label}
+      </span>
       {children}
     </div>
   );

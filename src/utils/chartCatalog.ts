@@ -8,7 +8,12 @@ import { celesbitPlateUrl, cephieChartUrl } from './fetch/charts';
 import type { OpenChart, OpenChartsIndex } from './fetch/openCharts';
 import { openChartUrl } from './fetch/openCharts';
 
-export type ChartSource = 'opencharts' | 'pfatc' | 'cephie' | 'celesbit' | 'chartfox';
+export type ChartSource =
+  | 'opencharts'
+  | 'pfatc'
+  | 'cephie'
+  | 'celesbit'
+  | 'chartfox';
 
 export type ChartCategory =
   | 'ground'
@@ -145,7 +150,8 @@ const OPENCHARTS_CATEGORY: Record<string, ChartCategory> = {
 };
 
 export function fromOpenCharts(icao: string, chart: OpenChart): ChartEntry {
-  const procedure = chart.kind === 'SID' || chart.kind === 'STAR' ? chart.label : null;
+  const procedure =
+    chart.kind === 'SID' || chart.kind === 'STAR' ? chart.label : null;
   const runways = (chart.rw ?? '').split(/[-/,\s]+/).filter(Boolean);
   return {
     id: `opencharts:${icao}:${chart.id}`,
@@ -165,9 +171,13 @@ export function fromOpenCharts(icao: string, chart: OpenChart): ChartEntry {
 }
 
 /** openCharts charts per airport; each airport also gets its region's area chart. */
-export function openChartsByAirport(index: OpenChartsIndex): Record<string, ChartEntry[]> {
+export function openChartsByAirport(
+  index: OpenChartsIndex
+): Record<string, ChartEntry[]> {
   const areaByRegion = new Map(
-    index.charts.filter((c) => c.kind === 'area' && c.region).map((c) => [c.region!, c])
+    index.charts
+      .filter((c) => c.kind === 'area' && c.region)
+      .map((c) => [c.region!, c])
   );
   const out: Record<string, ChartEntry[]> = {};
   for (const chart of index.charts) {

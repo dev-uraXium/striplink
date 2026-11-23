@@ -12,7 +12,8 @@ export function proxyClientIp(headers: IncomingHttpHeaders): string | null {
   if (!expected) return null;
   const given = headers['x-striplink-proxy-secret'];
   const ip = headers['x-striplink-client-ip'];
-  if (typeof given !== 'string' || typeof ip !== 'string' || !ip.trim()) return null;
+  if (typeof given !== 'string' || typeof ip !== 'string' || !ip.trim())
+    return null;
   const a = Buffer.from(given);
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;

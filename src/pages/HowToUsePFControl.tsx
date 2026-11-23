@@ -416,10 +416,10 @@ export default function HowToUsePFControl() {
               <h2>Profiles</h2>
               <p>
                 Every signed-in user gets a public profile page at{' '}
-                <code>/user/&lt;username&gt;</code>, showing role
-                badges, a bio, controlling and flying statistics, and up to a
-                few featured flights they've chosen to highlight. Profile owners
-                can customize their own page directly from the profile page.
+                <code>/user/&lt;username&gt;</code>, showing role badges, a bio,
+                controlling and flying statistics, and up to a few featured
+                flights they've chosen to highlight. Profile owners can
+                customize their own page directly from the profile page.
               </p>
             </section>
 
@@ -480,8 +480,8 @@ export default function HowToUsePFControl() {
               <h3>Is StripLink affiliated with Project Flight?</h3>
               <p>
                 StripLink is an independent platform based on PFControl by
-                Cephie Studios, and is not affiliated with Project Flight. It's built to work
-                alongside Project Flight.
+                Cephie Studios, and is not affiliated with Project Flight. It's
+                built to work alongside Project Flight.
               </p>
 
               <h3>Is StripLink free?</h3>
@@ -497,14 +497,23 @@ export default function HowToUsePFControl() {
                   Questions this guide didn't answer? Reach out
                   {BRAND.supportEmail && (
                     <>
-                      {' '}at <a href={`mailto:${BRAND.supportEmail}`}>{BRAND.supportEmail}</a>
+                      {' '}
+                      at{' '}
+                      <a href={`mailto:${BRAND.supportEmail}`}>
+                        {BRAND.supportEmail}
+                      </a>
                     </>
                   )}
                   {BRAND.supportEmail && BRAND.discordUrl && ' or'}
                   {BRAND.discordUrl && (
                     <>
-                      {' '}on{' '}
-                      <a href={BRAND.discordUrl} target="_blank" rel="noopener noreferrer">
+                      {' '}
+                      on{' '}
+                      <a
+                        href={BRAND.discordUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
                         Discord
                       </a>
                     </>

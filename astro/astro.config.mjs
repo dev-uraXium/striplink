@@ -85,7 +85,10 @@ export default defineConfig({
           'VITE_TERMS_URL',
           'VITE_PRIVACY_URL',
           'VITE_COOKIES_URL',
-        ].map((k) => [`import.meta.env.${k}`, JSON.stringify(rootViteEnv[k] ?? process.env[k] ?? '')])
+        ].map((k) => [
+          `import.meta.env.${k}`,
+          JSON.stringify(rootViteEnv[k] ?? process.env[k] ?? ''),
+        ])
       ),
     },
   },

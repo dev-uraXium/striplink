@@ -14,7 +14,7 @@ services:
       ignoredPaths:
         - cloudflare/**
         - README.md
-        - "*.md"
+        - '*.md'
     envVars:
       - key: NODE_ENV
         value: production
@@ -33,14 +33,14 @@ services:
         generateValue: true
       - key: DB_ENCRYPTION_KEY
         generateValue: true
-      - key: PROXY_SECRET          # copy this value to the Cloudflare Worker's PROXY_SECRET
+      - key: PROXY_SECRET # copy this value to the Cloudflare Worker's PROXY_SECRET
         generateValue: true
       # Fill these in on the Render dashboard when the Blueprint asks:
-      - key: FRONTEND_URL          # public URL = the Cloudflare Worker
+      - key: FRONTEND_URL # public URL = the Cloudflare Worker
         value: https://striplink.dev-uraxium.workers.dev
-      - key: PUBLIC_API_URL        # used for the Google Forms webhook URL
+      - key: PUBLIC_API_URL # used for the Google Forms webhook URL
         value: https://striplink.dev-uraxium.workers.dev
-      - key: POSTGRES_DB_URL       # Neon → Connect → pooled connection string
+      - key: POSTGRES_DB_URL # Neon → Connect → pooled connection string
         sync: false
       - key: DISCORD_CLIENT_ID
         sync: false
@@ -48,7 +48,7 @@ services:
         sync: false
       - key: DISCORD_REDIRECT_URI
         value: https://striplink.dev-uraxium.workers.dev/api/auth/discord/callback
-      - key: ADMIN_IDS             # your Discord user id(s), comma separated
+      - key: ADMIN_IDS # your Discord user id(s), comma separated
         sync: false
 
   - type: keyvalue
@@ -56,4 +56,4 @@ services:
     plan: free
     region: frankfurt
     maxmemoryPolicy: allkeys-lru
-    ipAllowList: []   # internal connections only
+    ipAllowList: [] # internal connections only

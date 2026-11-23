@@ -1,23 +1,30 @@
 // StripLink PF Radar: generate one ATIS per airport and the network post for all of them.
-import { useEffect, useMemo, useState } from "react";
-import { Copy, Loader, MessageSquare, Radar } from "lucide-react";
-import type { Socket } from "socket.io-client";
-import { Checkbox } from "@/components/ui/checkbox";
-import Button from "../common/Button";
+import { useEffect, useMemo, useState } from 'react';
+import { Copy, Loader, MessageSquare, Radar } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
+import { Checkbox } from '@/components/ui/checkbox';
+import Button from '../common/Button';
 import {
   PanelBody,
   PanelFooter,
   PanelHeader,
   PanelSection,
   SidePanel,
-} from "../common/SidePanel";
+} from '../common/SidePanel';
 import {
   generateRadarATIS,
   type RadarAirportAtis,
-} from "../../utils/fetch/atis";
-import { fetchPilotFormLink } from "../../utils/fetch/forms";
-import { buildRadarNetworkAtis, PF_RADAR } from "../../lib/networkAtis";
-import type { SessionUser } from "../../types/session";
+} from '../../utils/fetch/atis';
+import { fetchPilotLinks } from '../../utils/fetch/forms';
+import {
+  bestRadarStyle,
+  buildRadarNetworkAtis,
+  DISCORD_LIMIT,
+  PF_RADAR,
+  PFTRACKER_FILE_URL,
+  type RadarAtisStyle,
+} from '../../lib/networkAtis';
+import type { SessionUser } from '../../types/session';
 
 interface Props {
   sessionId?: string;
@@ -40,18 +47,22 @@ export default function RadarATIS({
   sessionUsers = [],
   onAtisUpdate,
 }: Props) {
-  const [ident, setIdent] = useState("A");
+  const [ident, setIdent] = useState('A');
   const [airports, setAirports] = useState<RadarAirportAtis[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [formLink, setFormLink] = useState<string | null>(null);
+  const [links, setLinks] = useState<{
+    url: string | null;
+    shortUrl: string | null;
+  }>({ url: null, shortUrl: null });
+  const [style, setStyle] = useState<RadarAtisStyle | 'auto'>('auto');
   const [includeLinks, setIncludeLinks] = useState(true);
 
   useEffect(() => {
     if (!open || !sessionId) return;
     let cancelled = false;
-    fetchPilotFormLink(sessionId).then((url) => !cancelled && setFormLink(url));
+    fetchPilotLinks(sessionId).then((l) => !cancelled && setLinks(l));
     return () => {
       cancelled = true;
     };
@@ -70,26 +81,35 @@ export default function RadarATIS({
         timestamp: Date.parse(data.timestamp),
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to generate the ATIS");
+      setError(e instanceof Error ? e.message : 'Failed to generate the ATIS');
     } finally {
       setLoading(false);
     }
   };
 
+  const formLink = links.shortUrl ?? links.url;
+  const baseInput = useMemo(
+    () => ({
+      controllers: sessionUsers.map((u) => ({
+        id: u.id,
+        position: u.position,
+      })),
+      airports,
+      ident,
+      links: includeLinks
+        ? [formLink ?? '', PFTRACKER_FILE_URL].filter(Boolean)
+        : [],
+    }),
+    [sessionUsers, airports, ident, includeLinks, formLink]
+  );
+  const effectiveStyle: RadarAtisStyle =
+    style === 'auto' ? bestRadarStyle(baseInput) : style;
   const post = useMemo(
     () =>
       airports.some((a) => a.text)
-        ? buildRadarNetworkAtis({
-            controllers: sessionUsers.map((u) => ({
-              id: u.id,
-              position: u.position,
-            })),
-            airports,
-            formLink: includeLinks ? formLink : null,
-            includePfTracker: includeLinks,
-          })
-        : "",
-    [airports, sessionUsers, includeLinks, formLink],
+        ? buildRadarNetworkAtis({ ...baseInput, style: effectiveStyle })
+        : '',
+    [airports, baseInput, effectiveStyle]
   );
 
   const copy = async () => {
@@ -116,15 +136,15 @@ export default function RadarATIS({
 
         <PanelSection title="ATIS Identifier">
           <div className="grid grid-cols-9 gap-1.5">
-            {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => (
+            {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((letter) => (
               <button
                 key={letter}
                 type="button"
                 onClick={() => setIdent(letter)}
                 className={`rounded-lg border-2 py-1 font-mono text-sm font-bold ${
                   ident === letter
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-zinc-800 text-zinc-300 hover:border-zinc-600"
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-zinc-800 text-zinc-300 hover:border-zinc-600'
                 }`}
               >
                 {letter}
@@ -150,7 +170,7 @@ export default function RadarATIS({
                   className="flex items-center justify-between gap-2"
                 >
                   <span className="font-mono text-zinc-300">
-                    {a.icao}{" "}
+                    {a.icao}{' '}
                     <span className="font-sans text-zinc-500">{a.name}</span>
                   </span>
                   {a.text ? (
@@ -159,7 +179,7 @@ export default function RadarATIS({
                     </span>
                   ) : (
                     <span className="text-amber-400">
-                      {a.error ?? "skipped"}
+                      {a.error ?? 'skipped'}
                     </span>
                   )}
                 </li>
@@ -175,7 +195,7 @@ export default function RadarATIS({
               <Button
                 onClick={copy}
                 size="xs"
-                variant={copied ? "success" : "primary"}
+                variant={copied ? 'success' : 'primary'}
                 className="h-8 gap-1.5"
               >
                 {copied ? (
@@ -183,7 +203,7 @@ export default function RadarATIS({
                 ) : (
                   <MessageSquare className="h-3.5 w-3.5" />
                 )}
-                {copied ? "Copied!" : "Copy for Discord"}
+                {copied ? 'Copied!' : 'Copy for Discord'}
               </Button>
             }
           >
@@ -195,14 +215,33 @@ export default function RadarATIS({
                 checked={includeLinks}
                 onCheckedChange={(c) => setIncludeLinks(c === true)}
               />
-              Add flight plan filing links (Google Form and PFTracker)
+              Add flight plan links (
+              {links.shortUrl ? 'short form link' : 'form link'} and PFTracker)
             </label>
-            {post.length > 2000 && (
-              <p className="mt-2 text-xs text-amber-400">
-                {post.length} characters: over Discord&apos;s 2000 limit, so
-                send it as two messages (or use Nitro).
-              </p>
-            )}
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="mr-1 text-zinc-400">ATIS style</span>
+              {(['auto', 'full', 'compact', 'short'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStyle(s)}
+                  className={`rounded-full border-2 px-2.5 py-0.5 font-semibold capitalize ${
+                    style === s
+                      ? 'border-blue-600 bg-blue-600 text-white'
+                      : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'
+                  }`}
+                >
+                  {s === 'auto' ? `Auto (${effectiveStyle})` : s}
+                </button>
+              ))}
+            </div>
+            <p
+              className={`mt-2 text-xs ${post.length > DISCORD_LIMIT ? 'text-amber-400' : 'text-zinc-500'}`}
+            >
+              {post.length}/{DISCORD_LIMIT} characters
+              {post.length > DISCORD_LIMIT &&
+                ': too long for one Discord message, pick a shorter style or post it in two.'}
+            </p>
           </PanelSection>
         )}
       </PanelBody>
@@ -219,8 +258,8 @@ export default function RadarATIS({
         >
           {loading && <Loader className="h-4 w-4 animate-spin" />}
           {airports.length
-            ? "Regenerate all airports"
-            : "Generate for all airports"}
+            ? 'Regenerate all airports'
+            : 'Generate for all airports'}
         </Button>
       </PanelFooter>
     </SidePanel>

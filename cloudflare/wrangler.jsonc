@@ -8,10 +8,10 @@
   // everything else falls through to worker.js and the Render origin.
   "assets": { "directory": "./public", "not_found_handling": "none" },
   "vars": {
-    "ORIGIN": "https://striplink.onrender.com"
+    "ORIGIN": "https://striplink.onrender.com",
   },
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    "crons": ["*/10 * * * *"],
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
 }

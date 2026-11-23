@@ -122,80 +122,78 @@ async function finishLogin(
   discordUser: LoginUser,
   tokens: { accessToken: string; refreshToken: string }
 ) {
+  const ipAddress = getClientIp(req);
+  const isVpn = await detectVPN(req);
 
-    const ipAddress = getClientIp(req);
-    const isVpn = await detectVPN(req);
+  const existingUser = await getUserById(discordUser.id);
+  const isNewUser = !existingUser;
 
-    const existingUser = await getUserById(discordUser.id);
-    const isNewUser = !existingUser;
+  await createOrUpdateUser({
+    id: discordUser.id,
+    username: discordUser.username,
+    discriminator: discordUser.discriminator || '0',
+    avatar: discordUser.avatar,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    ipAddress: ipAddress,
+    isVpn: isVpn,
+  });
 
-    await createOrUpdateUser({
-      id: discordUser.id,
-      username: discordUser.username,
-      discriminator: discordUser.discriminator || '0',
-      avatar: discordUser.avatar,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      ipAddress: ipAddress,
-      isVpn: isVpn,
-    });
-
-    await recordLogin();
-    if (isNewUser) {
-      await recordNewUser();
-      capture(req, {
-        distinctId: discordUser.id,
-        event: 'user_signed_up',
-        properties: {
-          username: discordUser.username,
-          $set_once: { created_at: new Date().toISOString() },
-        },
-      });
-    }
-
-    posthog.identify({
-      distinctId: discordUser.id,
-      properties: {
-        username: discordUser.username,
-        discord_id: discordUser.id,
-        is_admin: isAdmin(discordUser.id),
-        is_vpn: isVpn,
-      },
-    });
+  await recordLogin();
+  if (isNewUser) {
+    await recordNewUser();
     capture(req, {
       distinctId: discordUser.id,
-      event: 'user_logged_in',
-      properties: { username: discordUser.username, is_vpn: isVpn },
+      event: 'user_signed_up',
+      properties: {
+        username: discordUser.username,
+        $set_once: { created_at: new Date().toISOString() },
+      },
     });
+  }
 
-    const payload = {
-      userId: discordUser.id,
+  posthog.identify({
+    distinctId: discordUser.id,
+    properties: {
       username: discordUser.username,
-      discriminator: discordUser.discriminator || '0',
-      avatar: discordUser.avatar,
-      isAdmin: isAdmin(discordUser.id),
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7d
-    };
+      discord_id: discordUser.id,
+      is_admin: isAdmin(discordUser.id),
+      is_vpn: isVpn,
+    },
+  });
+  capture(req, {
+    distinctId: discordUser.id,
+    event: 'user_logged_in',
+    properties: { username: discordUser.username, is_vpn: isVpn },
+  });
 
-    const token = jwt.sign(payload, JWT_SECRET as string, {
-      algorithm: 'HS256',
-    });
+  const payload = {
+    userId: discordUser.id,
+    username: discordUser.username,
+    discriminator: discordUser.discriminator || '0',
+    avatar: discordUser.avatar,
+    isAdmin: isAdmin(discordUser.id),
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7d
+  };
 
-    res.cookie('auth_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
-      path: '/',
-    });
+  const token = jwt.sign(payload, JWT_SECRET as string, {
+    algorithm: 'HS256',
+  });
 
-    const platformToken = await ensureUserPlatformToken(discordUser.id);
-    res.cookie('platform_token', platformToken, {
-      ...platformTokenCookieOptions,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
-    });
+  res.cookie('auth_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
+    path: '/',
+  });
 
+  const platformToken = await ensureUserPlatformToken(discordUser.id);
+  res.cookie('platform_token', platformToken, {
+    ...platformTokenCookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
+  });
 }
 
 router.get('/discord', (req, res) => {
@@ -223,7 +221,10 @@ router.get('/discord', (req, res) => {
 // Local testing only: sign in as a fake user without a Discord app.
 // Enabled by DEV_LOGIN=true and never in production.
 router.get('/dev-login', authLimiter, async (req, res) => {
-  if (process.env.NODE_ENV === 'production' || process.env.DEV_LOGIN !== 'true') {
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.DEV_LOGIN !== 'true'
+  ) {
     return res.status(404).json({ error: 'Not found' });
   }
   const username =
@@ -231,12 +232,27 @@ router.get('/dev-login', authLimiter, async (req, res) => {
       .replace(/[^a-zA-Z0-9_.]/g, '')
       .slice(0, 32) || 'dev';
   // Stable snowflake-like id per username (Discord ids are numeric strings)
-  const hash = crypto.createHash('sha256').update(`dev:${username.toLowerCase()}`).digest();
-  const id = '9' + (hash.readBigUInt64BE(0) % 10n ** 17n).toString().padStart(17, '0');
+  const hash = crypto
+    .createHash('sha256')
+    .update(`dev:${username.toLowerCase()}`)
+    .digest();
+  const id =
+    '9' + (hash.readBigUInt64BE(0) % 10n ** 17n).toString().padStart(17, '0');
   try {
-    await finishLogin(req, res, { id, username }, { accessToken: 'dev', refreshToken: 'dev' });
-    const callback = typeof req.query.callback === 'string' ? req.query.callback : '/';
-    res.redirect(FRONTEND_URL + (callback.startsWith('/') && !callback.startsWith('//') ? callback : '/'));
+    await finishLogin(
+      req,
+      res,
+      { id, username },
+      { accessToken: 'dev', refreshToken: 'dev' }
+    );
+    const callback =
+      typeof req.query.callback === 'string' ? req.query.callback : '/';
+    res.redirect(
+      FRONTEND_URL +
+        (callback.startsWith('/') && !callback.startsWith('//')
+          ? callback
+          : '/')
+    );
   } catch (error) {
     console.error('Dev login error:', error);
     res.status(500).json({ error: 'Dev login failed' });

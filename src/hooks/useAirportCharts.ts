@@ -7,7 +7,10 @@ import {
   type CephieChartIndex,
 } from '../utils/fetch/charts';
 import { useChartSources } from './useChartSources';
-import { fetchOpenChartsIndex, type OpenChartsIndex } from '../utils/fetch/openCharts';
+import {
+  fetchOpenChartsIndex,
+  type OpenChartsIndex,
+} from '../utils/fetch/openCharts';
 import {
   openChartsByAirport,
   fromBundled,
@@ -36,7 +39,10 @@ const loadOpenCharts = cachedLoader<OpenChartsIndex>(fetchOpenChartsIndex);
 export function useAirportCharts() {
   const [index, setIndex] = useState<CelesbitChartIndex | null>(null);
   const [cephieIndex, setCephieIndex] = useState<CephieChartIndex | null>(null);
-  const [openCharts, setOpenCharts] = useState<Record<string, ChartEntry[]> | null>(null);
+  const [openCharts, setOpenCharts] = useState<Record<
+    string,
+    ChartEntry[]
+  > | null>(null);
   const sources = useChartSources();
 
   useEffect(() => {

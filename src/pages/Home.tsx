@@ -398,7 +398,6 @@ export default function Home({ standalone = true }: HomeProps) {
         </div>
       </section>
 
-
       {/* CTA Section */}
       <section className="relative bg-[url('/assets/images/hero.webp')] bg-cover bg-center text-white min-h-[90vh] flex items-center px-4 sm:px-6">
         <div

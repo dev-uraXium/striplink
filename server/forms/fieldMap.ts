@@ -21,11 +21,46 @@ type Field =
   | 'pilot';
 
 export const FIELD_ALIASES: Record<Field, string[]> = {
-  callsign: ['callsign', 'call sign', 'flight callsign', 'flight number', 'flight no'],
-  aircraft_type: ['aircraft', 'aircraft type', 'type', 'ac type', 'plane', 'aircraft icao'],
-  flight_type: ['flight rules', 'rules', 'ifr vfr', 'ifr or vfr', 'flight type'],
-  departure: ['departure', 'departure airport', 'departing', 'from', 'origin', 'dep', 'adep'],
-  arrival: ['arrival', 'arrival airport', 'destination', 'to', 'arr', 'dest', 'ades'],
+  callsign: [
+    'callsign',
+    'call sign',
+    'flight callsign',
+    'flight number',
+    'flight no',
+  ],
+  aircraft_type: [
+    'aircraft',
+    'aircraft type',
+    'type',
+    'ac type',
+    'plane',
+    'aircraft icao',
+  ],
+  flight_type: [
+    'flight rules',
+    'rules',
+    'ifr vfr',
+    'ifr or vfr',
+    'flight type',
+  ],
+  departure: [
+    'departure',
+    'departure airport',
+    'departing',
+    'from',
+    'origin',
+    'dep',
+    'adep',
+  ],
+  arrival: [
+    'arrival',
+    'arrival airport',
+    'destination',
+    'to',
+    'arr',
+    'dest',
+    'ades',
+  ],
   alternate: ['alternate', 'alternate airport', 'altn'],
   route: ['route', 'flight route', 'planned route'],
   cruisingFL: [
@@ -43,7 +78,15 @@ export const FIELD_ALIASES: Record<Field, string[]> = {
   gate: ['gate'],
   remark: ['remarks', 'remark', 'notes', 'comments', 'other info'],
   roblox_username: ['roblox username', 'roblox', 'roblox name', 'roblox user'],
-  pilot: ['pilot', 'pilot name', 'discord username', 'discord', 'username', 'your name', 'name'],
+  pilot: [
+    'pilot',
+    'pilot name',
+    'discord username',
+    'discord',
+    'username',
+    'your name',
+    'name',
+  ],
 };
 
 const norm = (s: unknown) =>
@@ -53,7 +96,10 @@ const norm = (s: unknown) =>
     .trim();
 
 const lookup = new Map<string, Field>();
-for (const [field, aliases] of Object.entries(FIELD_ALIASES) as [Field, string[]][]) {
+for (const [field, aliases] of Object.entries(FIELD_ALIASES) as [
+  Field,
+  string[],
+][]) {
   for (const alias of aliases) lookup.set(norm(alias), field);
 }
 
@@ -64,7 +110,11 @@ export function fieldForTitle(title: string): Field | null {
   // "Callsign (e.g. BAW123)" -> longest alias the title starts with
   let best: { alias: string; field: Field } | null = null;
   for (const [alias, field] of lookup) {
-    if (alias.length > 2 && n.startsWith(alias + ' ') && (!best || alias.length > best.alias.length)) {
+    if (
+      alias.length > 2 &&
+      n.startsWith(alias + ' ') &&
+      (!best || alias.length > best.alias.length)
+    ) {
       best = { alias, field };
     }
   }
@@ -74,7 +124,10 @@ export function fieldForTitle(title: string): Field | null {
 const clip = (v: string, n: number) => v.trim().slice(0, n);
 
 /** "EGKK - London Gatwick" -> "EGKK" */
-const icao = (v: string) => clip(v, 4).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const icao = (v: string) =>
+  clip(v, 4)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
 
 /** StripLink stores levels as 3 digits in hundreds of feet: "FL350" / "35000" / "350" -> "350" */
 export function normalizeLevel(v: string) {
@@ -105,7 +158,9 @@ export function answersToFlight(answers: FormAnswers): {
   const unmapped: Record<string, string> = {};
 
   for (const [title, raw] of Object.entries(answers ?? {})) {
-    const value = (Array.isArray(raw) ? raw.join(', ') : String(raw ?? '')).trim();
+    const value = (
+      Array.isArray(raw) ? raw.join(', ') : String(raw ?? '')
+    ).trim();
     if (!value) continue;
     const field = fieldForTitle(title);
     if (field && !fields[field]) fields[field] = value;
@@ -113,17 +168,25 @@ export function answersToFlight(answers: FormAnswers): {
   }
 
   const flight: AddFlightData = {
-    callsign: fields.callsign ? clip(fields.callsign, 16).toUpperCase().replace(/\s+/g, '') : undefined,
-    aircraft_type: fields.aircraft_type ? clip(fields.aircraft_type, 16).toUpperCase() : undefined,
+    callsign: fields.callsign
+      ? clip(fields.callsign, 16).toUpperCase().replace(/\s+/g, '')
+      : undefined,
+    aircraft_type: fields.aircraft_type
+      ? clip(fields.aircraft_type, 16).toUpperCase()
+      : undefined,
     flight_type: flightRules(fields.flight_type ?? ''),
     departure: fields.departure ? icao(fields.departure) : undefined,
     arrival: fields.arrival ? icao(fields.arrival) : undefined,
     alternate: fields.alternate ? icao(fields.alternate) : undefined,
     route: fields.route ? clip(fields.route, 500).toUpperCase() : undefined,
-    cruisingFL: fields.cruisingFL ? normalizeLevel(fields.cruisingFL) || undefined : undefined,
+    cruisingFL: fields.cruisingFL
+      ? normalizeLevel(fields.cruisingFL) || undefined
+      : undefined,
     stand: fields.stand ? clip(fields.stand, 8).toUpperCase() : undefined,
     gate: fields.gate ? clip(fields.gate, 8).toUpperCase() : undefined,
-    roblox_username: fields.roblox_username ? clip(fields.roblox_username, 40) : undefined,
+    roblox_username: fields.roblox_username
+      ? clip(fields.roblox_username, 40)
+      : undefined,
     status: 'PENDING',
     submitted_via: 'form',
   } as AddFlightData;

@@ -49,7 +49,10 @@ export default {
       const loc = res.headers.get('Location');
       if (loc && loc.startsWith(origin.origin)) {
         const out = new Response(res.body, res);
-        out.headers.set('Location', url.origin + loc.slice(origin.origin.length));
+        out.headers.set(
+          'Location',
+          url.origin + loc.slice(origin.origin.length)
+        );
         return out;
       }
       return res;
@@ -58,12 +61,19 @@ export default {
         '<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=10><title>StripLink</title>' +
           '<body style="font-family:system-ui;background:#0b1220;color:#cbd5e1;display:grid;place-items:center;height:100vh;margin:0">' +
           '<p>StripLink is starting up — this page refreshes in a few seconds.</p>',
-        { status: 503, headers: { 'Content-Type': 'text/html', 'Retry-After': '10' } }
+        {
+          status: 503,
+          headers: { 'Content-Type': 'text/html', 'Retry-After': '10' },
+        }
       );
     }
   },
 
   async scheduled(_event, env, ctx) {
-    ctx.waitUntil(fetch(new URL('/health', env.ORIGIN), { headers: { 'User-Agent': 'striplink-keepalive' } }));
+    ctx.waitUntil(
+      fetch(new URL('/health', env.ORIGIN), {
+        headers: { 'User-Agent': 'striplink-keepalive' },
+      })
+    );
   },
 };

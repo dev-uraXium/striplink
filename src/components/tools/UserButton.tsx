@@ -227,7 +227,6 @@ export default function CustomUserButton({
             <span>Settings</span>
           </button>
 
-
           <button
             onClick={() =>
               handleAction(() => (window.location.href = '/developers'))
@@ -385,7 +384,6 @@ export default function CustomUserButton({
               <Settings className="w-4 h-4 shrink-0" />
               <span className="font-medium">Settings</span>
             </button>
-
 
             <button
               onClick={() => {

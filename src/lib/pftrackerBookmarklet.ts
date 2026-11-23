@@ -53,7 +53,10 @@ export const BOOKMARKLET_SOURCE = `(async () => {
 
 /** The javascript: URL to drag to the bookmarks bar. */
 export function buildBookmarklet(striplinkOrigin: string) {
-  const code = BOOKMARKLET_SOURCE.replace('__STRIPLINK__', striplinkOrigin.replace(/\/+$/, ''))
+  const code = BOOKMARKLET_SOURCE.replace(
+    '__STRIPLINK__',
+    striplinkOrigin.replace(/\/+$/, '')
+  )
     .replace(/^\s+/gm, '')
     .replace(/\n/g, ' ');
   return `javascript:${encodeURIComponent(code)}`;

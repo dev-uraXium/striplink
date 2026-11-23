@@ -856,7 +856,7 @@ export default function PilotProfile({
                 <div className="flex flex-col md:flex-row md:items-start gap-6">
                   {/* Avatar */}
                   <div className="relative self-center md:self-auto">
-                    {(
+                    {
                       <div
                         className="size-24 overflow-hidden rounded-full border-2 border-blue-600 bg-gray-800 shadow-xl md:size-32"
                         style={
@@ -872,7 +872,7 @@ export default function PilotProfile({
                           className="size-full object-cover"
                         />
                       </div>
-                    )}
+                    }
                     {hasCrown && (
                       <Crown
                         className="absolute -top-2 right-0 w-10 h-10 transform rotate-12 shadow-2xl"
@@ -910,9 +910,7 @@ export default function PilotProfile({
                   {/* User Info */}
                   <div className="flex-1 text-center md:text-left">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-3 justify-center md:justify-start">
-                      <h1
-                        className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight text-white"
-                      >
+                      <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight text-white">
                         {profile.user.username}
                       </h1>
                     </div>
@@ -1664,4 +1662,3 @@ function StatsSection({
     </div>
   );
 }
-

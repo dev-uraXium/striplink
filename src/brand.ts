@@ -22,4 +22,6 @@ export const UPSTREAM = {
   url: 'https://github.com/cephie-studios/pfcontrol-2',
 } as const;
 
-export const hasLegalLinks = Boolean(BRAND.termsUrl || BRAND.privacyUrl || BRAND.cookiesUrl);
+export const hasLegalLinks = Boolean(
+  BRAND.termsUrl || BRAND.privacyUrl || BRAND.cookiesUrl
+);

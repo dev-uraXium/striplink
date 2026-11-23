@@ -2,7 +2,11 @@
 // Generated with the session's webhook URL and secret already filled in.
 // Keep in sync with google/apps-script.gs (the commented reference copy).
 
-export function buildAppsScript(webhookUrl: string, secret: string, airports: string[] = []) {
+export function buildAppsScript(
+  webhookUrl: string,
+  secret: string,
+  airports: string[] = []
+) {
   const airportList = airports.length
     ? airports.map((a) => `  '${a.replace(/'/g, '')}',`).join('\n')
     : "  'EGKK',";
@@ -117,6 +121,7 @@ const STRIPLINK_REGISTER_URL = '${registerUrl}';
 const STRIPLINK_SECRET = '${secret}';
 const SESSION_QUESTION = 'StripLink session';
 const PLACEHOLDER = '__STRIPLINK_SESSION__';
+const SESSION_HELP = 'Filled in by your controller\\'s link. Empty is fine: it then goes to PF Radar.';
 
 function onFormSubmit(e) {
   if (!e || !e.response) {
@@ -156,7 +161,7 @@ function setupStripLinkForm() {
     form.setTitle('StripLink flight plan');
     form.setDescription(formDescription_());
     form.addTextItem().setTitle(SESSION_QUESTION)
-      .setHelpText('Filled in by your controller\\'s link. Don\\'t change it.').setRequired(true);
+      .setHelpText(SESSION_HELP).setRequired(false);
     form.addTextItem().setTitle('Roblox username').setRequired(true);
     form.addTextItem().setTitle('Callsign').setHelpText('e.g. BAW123').setRequired(true);
     form.addTextItem().setTitle('Aircraft').setHelpText('ICAO type, e.g. A320, B738').setRequired(true);
@@ -187,9 +192,13 @@ function formDescription_() {
     'and it fills this form in for you.';
 }
 
-/** Updates the intro text on an existing form. */
+/** Updates the intro text on an existing form, and lets the session answer be empty (PF Radar). */
 function updateFormDescription() {
-  FormApp.getActiveForm().setDescription(formDescription_());
+  const form = FormApp.getActiveForm();
+  form.setDescription(formDescription_());
+  form.getItems(FormApp.ItemType.TEXT).forEach(function (i) {
+    if (i.getTitle() === SESSION_QUESTION) i.asTextItem().setRequired(false).setHelpText(SESSION_HELP);
+  });
   console.log('Form description updated.');
 }
 

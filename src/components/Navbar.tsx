@@ -708,7 +708,6 @@ export default function Navbar({
         </div>
       )}
 
-
       {user && (
         <FeedbackBanner
           isOpen={showFeedbackBanner}
