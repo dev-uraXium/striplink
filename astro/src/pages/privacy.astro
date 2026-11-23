@@ -1,0 +1,15 @@
+---
+import { SPA_SITE_URL } from '../lib/spaSeo';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LegalContent from '@app/islands/LegalContent';
+
+const PAGE_URL = `${SPA_SITE_URL}/privacy`;
+---
+
+<BaseLayout
+  title="Privacy Policy — StripLink"
+  description="What personal data StripLink collects, why, who handles it and your rights under the GDPR."
+  canonicalUrl={PAGE_URL}
+>
+  <LegalContent doc="privacy" pathname={Astro.url.pathname} client:load />
+</BaseLayout>

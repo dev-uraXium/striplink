@@ -37,6 +37,9 @@ const SITE = (
 // /sitemap-flights.xml and declared in robots.txt) rather than this
 // build-time one, since that data changes far more often than static pages.
 const customPages = [
+  `${SITE}/terms`,
+  `${SITE}/privacy`,
+  `${SITE}/cookies`,
   `${SITE}/create`,
   `${SITE}/overview`,
   `${SITE}/charts`,
@@ -71,6 +74,19 @@ export default defineConfig({
       'import.meta.env.VITE_POSTHOG_KEY': JSON.stringify(posthogKey),
       'import.meta.env.VITE_POSTHOG_HOST': JSON.stringify(posthogHost),
       'import.meta.env.VITE_SERVER_URL': JSON.stringify(astroClientApiBase),
+      // StripLink branding (src/brand.ts) for Astro-rendered pages
+      ...Object.fromEntries(
+        [
+          'VITE_BRAND_OWNER',
+          'VITE_BRAND_OWNER_URL',
+          'VITE_SUPPORT_EMAIL',
+          'VITE_DISCORD_URL',
+          'VITE_GITHUB_URL',
+          'VITE_TERMS_URL',
+          'VITE_PRIVACY_URL',
+          'VITE_COOKIES_URL',
+        ].map((k) => [`import.meta.env.${k}`, JSON.stringify(rootViteEnv[k] ?? process.env[k] ?? '')])
+      ),
     },
   },
 });

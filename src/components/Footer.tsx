@@ -57,13 +57,13 @@ const resourceLinks: FooterLink[] = [
 
 const legalLinks: FooterLink[] = [
   ...(BRAND.termsUrl
-    ? [{ href: BRAND.termsUrl, label: 'Terms of Use', icon: ScrollText, external: true }]
+    ? [{ href: BRAND.termsUrl, label: 'Terms of Use', external: /^https?:/.test(BRAND.termsUrl), icon: ScrollText }]
     : []),
   ...(BRAND.privacyUrl
-    ? [{ href: BRAND.privacyUrl, label: 'Privacy Policy', icon: Shield, external: true }]
+    ? [{ href: BRAND.privacyUrl, label: 'Privacy Policy', external: /^https?:/.test(BRAND.privacyUrl), icon: Shield }]
     : []),
   ...(BRAND.cookiesUrl
-    ? [{ href: BRAND.cookiesUrl, label: 'Cookies Policy', icon: Cookie, external: true }]
+    ? [{ href: BRAND.cookiesUrl, label: 'Cookies Policy', external: /^https?:/.test(BRAND.cookiesUrl), icon: Cookie }]
     : []),
 ];
 

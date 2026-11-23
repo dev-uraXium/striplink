@@ -51,11 +51,11 @@ export const SPA_WEB_APPLICATION_LD = {
   keywords: SPA_DEFAULT_KEYWORDS,
   author: {
     '@type': 'Organization',
-    name: 'Cephie Studios',
+    name: 'Coral Reef Studios',
   },
   publisher: {
     '@type': 'Organization',
-    name: 'Cephie Studios',
+    name: 'Coral Reef Studios',
     url: SPA_SITE_URL,
   },
 };

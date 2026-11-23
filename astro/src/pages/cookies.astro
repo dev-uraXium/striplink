@@ -1,0 +1,15 @@
+---
+import { SPA_SITE_URL } from '../lib/spaSeo';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LegalContent from '@app/islands/LegalContent';
+
+const PAGE_URL = `${SPA_SITE_URL}/cookies`;
+---
+
+<BaseLayout
+  title="Cookies Policy — StripLink"
+  description="The strictly necessary cookies and browser storage StripLink uses."
+  canonicalUrl={PAGE_URL}
+>
+  <LegalContent doc="cookies" pathname={Astro.url.pathname} client:load />
+</BaseLayout>

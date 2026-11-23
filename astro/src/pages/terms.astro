@@ -1,0 +1,15 @@
+---
+import { SPA_SITE_URL } from '../lib/spaSeo';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import LegalContent from '@app/islands/LegalContent';
+
+const PAGE_URL = `${SPA_SITE_URL}/terms`;
+---
+
+<BaseLayout
+  title="Terms of Use — StripLink"
+  description="The rules for using StripLink, the free flight strip and ATC tool for Project Flight."
+  canonicalUrl={PAGE_URL}
+>
+  <LegalContent doc="terms" pathname={Astro.url.pathname} client:load />
+</BaseLayout>

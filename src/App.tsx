@@ -85,6 +85,7 @@ function usePreloadPages() {
 
 const HowToUsePFControl = lazy(() => import('./pages/HowToUsePFControl'));
 const Glossary = lazy(() => import('./pages/Glossary'));
+const Legal = lazy(() => import('./pages/Legal'));
 const DeveloperDocsPage = lazy(() => import('./pages/DeveloperDocsPage'));
 
 const Admin = lazy(() => import('./pages/Admin'));
@@ -161,6 +162,9 @@ export default function App() {
             <Route path="/user/:username" element={<PilotProfile />} />
             <Route path="/howtousepfcontrol" element={<HowToUsePFControl />} />
             <Route path="/glossary" element={<Glossary />} />
+            <Route path="/terms" element={<Legal doc="terms" />} />
+            <Route path="/privacy" element={<Legal doc="privacy" />} />
+            <Route path="/cookies" element={<Legal doc="cookies" />} />
             <Route path="/charts" element={<Charts />} />
             <Route path="/developers/docs" element={<DeveloperDocsPage />} />
 
