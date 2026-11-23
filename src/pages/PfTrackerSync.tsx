@@ -1,4 +1,4 @@
-// /pftracker: pilots grab the opt-in "Send to StripLink" bookmarklet here.
+// /pftracker: pilots grab the opt-in "Import Flight Plan" bookmarklet here.
 import { useEffect, useRef, useState } from 'react';
 import { Bookmark, Copy, Check } from 'lucide-react';
 import Navbar from '../components/Navbar';
@@ -60,7 +60,7 @@ export default function PfTrackerSync() {
                 }}
                 className="inline-flex cursor-grab items-center gap-2 rounded-full bg-blue-600 px-5 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/30 hover:bg-blue-500"
               >
-                <Bookmark className="h-4 w-4" /> Send to StripLink
+                <Bookmark className="h-4 w-4" /> Import Flight Plan
               </a>
               <button
                 type="button"
@@ -78,7 +78,7 @@ export default function PfTrackerSync() {
             </div>
             <p className="mt-3 text-xs text-zinc-500">
               Can&apos;t drag? Click &quot;Copy code instead&quot;, add a new
-              bookmark named Send to StripLink, and paste the code as its URL.
+              bookmark named Import Flight Plan, and paste the code as its URL.
             </p>
           </li>
 
@@ -99,13 +99,12 @@ export default function PfTrackerSync() {
           </li>
 
           <li className="rounded-2xl border border-zinc-800 bg-zinc-950 p-5">
-            <h2 className="mb-2 font-bold">3. Click Send to StripLink</h2>
+            <h2 className="mb-2 font-bold">3. Click Import Flight Plan</h2>
             <p className="text-sm text-zinc-400">
-              While you&apos;re on PFTracker, click the bookmark and paste the
-              flight plan link your controller posted (the same link you&apos;d
-              use to file normally). Your StripLink form opens with your
-              callsign, airports, route and level filled in. Check it, add your
-              aircraft if it&apos;s missing, and press Submit.
+              While you&apos;re on PFTracker, click the bookmark. The StripLink
+              flight plan form opens with your callsign, airports, route and
+              level filled in. Check it, add your aircraft if it&apos;s missing,
+              and press Submit.
             </p>
           </li>
         </ol>

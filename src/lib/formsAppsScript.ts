@@ -189,7 +189,7 @@ function setupStripLinkForm() {
 function formDescription_() {
   const site = STRIPLINK_URL.replace(/\\/api\\/.*$/, '');
   return 'File your flight plan. It goes straight onto your controller\\'s StripLink board.\\n\\n' +
-    'Already filed on PFTracker? Get the one-click "Send to StripLink" button at ' + site + '/pftracker ' +
+    'Already filed on PFTracker? Get the one-click "Import Flight Plan" button at ' + site + '/pftracker ' +
     'and it fills this form in for you.';
 }
 

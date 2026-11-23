@@ -1,13 +1,14 @@
-// "Send to StripLink" bookmarklet. The pilot clicks it on PFTracker
+// "Import Flight Plan" bookmarklet. The pilot clicks it on PFTracker
 // (canary.project-flight.com) in their own browser: it reads THEIR flight plan there and
-// opens the StripLink Google Form pre-filled for the session they choose. Nothing runs
+// opens the StripLink Google Form pre-filled with it. No link to paste: the form's
+// session-less responses go to the open PF Radar session. Nothing runs
 // unless the pilot clicks it, and StripLink's servers never contact Project Flight.
 
 /** Readable source, kept for review. `__STRIPLINK__` is replaced with the site URL. */
 export const BOOKMARKLET_SOURCE = `(async () => {
   const STRIPLINK = '__STRIPLINK__';
   if (!/(^|\\.)project-flight\\.com$/.test(location.hostname)) {
-    alert('Open PFTracker (canary.project-flight.com) and file your flight plan first, then click Send to StripLink.');
+    alert('Open PFTracker (canary.project-flight.com) and file your flight plan first, then click Import Flight Plan.');
     return;
   }
   const viewId = (location.pathname.match(/flight-plan\\/view\\/([0-9a-f-]{36})/i) || [])[1];
@@ -29,12 +30,6 @@ export const BOOKMARKLET_SOURCE = `(async () => {
     alert('No active PFTracker flight plan found. File one on PFTracker first.');
     return;
   }
-  const pasted = prompt('Paste the flight plan link your controller posted (the StripLink / Google Form link):', localStorage.getItem('striplinkSession') || '');
-  if (!pasted) return;
-  const ids = pasted.match(/\\b[0-9a-f]{8}\\b/gi);
-  if (!ids) { alert('That link doesn\\'t contain a StripLink session. Copy the flight plan link your controller posted.'); return; }
-  const session = ids[ids.length - 1].toLowerCase();
-  localStorage.setItem('striplinkSession', session);
   const d = plan.departureInfo || {}, s = plan.selections || {}, a = plan.aircraftInfo || {};
   const alt = Number(s.altitude);
   const params = new URLSearchParams({
@@ -48,7 +43,7 @@ export const BOOKMARKLET_SOURCE = `(async () => {
     route: (plan.routeInfo || {}).route || '',
     remarks: 'From PFTracker' + (s.departureRunway ? ' (DEP RWY ' + s.departureRunway + (s.arrivalRunway ? ', ARR RWY ' + s.arrivalRunway : '') + ')' : ''),
   });
-  window.open(STRIPLINK + '/api/forms/prefill/' + session + '?' + params.toString(), '_blank');
+  window.open(STRIPLINK + '/api/forms/prefill?' + params.toString(), '_blank');
 })();`;
 
 /** The javascript: URL to drag to the bookmarks bar. */

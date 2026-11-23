@@ -283,7 +283,7 @@ export default function GoogleFormModal({
                       rel="noreferrer"
                       className="text-blue-300 underline"
                     >
-                      Send to StripLink button
+                      Import Flight Plan button
                     </a>
                     .
                   </p>

@@ -273,7 +273,7 @@ export default function HowToUsePFControl() {
               </p>
               <p>
                 Already filed on PFTracker? The{' '}
-                <a href="/pftracker">Send to StripLink</a> button copies that
+                <a href="/pftracker">Import Flight Plan</a> button copies that
                 plan into the form so there's nothing to type twice. It's
                 optional and only runs when the pilot clicks it.
               </p>

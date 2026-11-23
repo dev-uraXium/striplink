@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 //   GET/POST /api/forms/session/:sessionId/*  <- session owner manages it from the board
 //   POST /api/forms/shared[/register]         <- the site-wide shared form (see forms/shared.ts)
 //   GET  /api/forms/shared/setup               <- admin: what the shared form's script needs
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { mainDb } from '../db/connection.js';
 import requireAuth from '../middleware/auth.js';
@@ -265,34 +265,15 @@ router.get('/link/:sessionId', async (req, res) => {
   res.json({ url: sharedFormLink(shared, sessionId), shortUrl });
 });
 
-// GET: /api/forms/prefill/:sessionId?callsign=&dep=... - opens the shared form with a
-// pilot's details filled in (used by the PFTracker "Send to StripLink" bookmarklet)
-router.get('/prefill/:sessionId', async (req, res) => {
-  const sessionId = validSessionParam(req.params.sessionId);
-  const back = (msg: string, status = 400) =>
-    res
-      .status(status)
-      .type('text/plain')
-      .send(
-        `${msg}\n\nAsk your controller for their StripLink link, or fill the flight plan in by hand.`
-      );
-  if (!sessionId) return back('That StripLink session ID does not look right.');
-  const settings = await getFormSettings(sessionId);
-  if (!settings)
-    return back(`StripLink session ${sessionId} was not found.`, 404);
-  if (!settings.form_webhook_secret)
-    return back(
-      'This session is not taking Google Form flight plans right now.',
-      403
-    );
-  const shared = await getSharedForm().catch(() => null);
-  if (!shared)
-    return back('The StripLink flight plan form is not set up yet.', 503);
+// GET: /api/forms/prefill[/:sessionId]?callsign=&dep=... - opens the shared form with a
+// pilot's details filled in (used by the PFTracker "Import Flight Plan" bookmarklet).
+// Without a session the response goes where the plain form link goes: the open PF Radar session.
+const prefillQuery = (req: Request) => {
   const q = (k: string) =>
     typeof req.query[k] === 'string'
       ? (req.query[k] as string).slice(0, 500)
       : undefined;
-  const link = buildPrefilledLink(shared, sessionId, {
+  return {
     roblox: q('roblox'),
     callsign: q('callsign'),
     aircraft: q('aircraft'),
@@ -302,9 +283,52 @@ router.get('/prefill/:sessionId', async (req, res) => {
     level: q('level'),
     route: q('route'),
     remarks: q('remarks'),
-  });
+  };
+};
+const prefillError = (res: Response, msg: string, status = 400) =>
+  res
+    .status(status)
+    .type('text/plain')
+    .send(`${msg}\n\nFill the flight plan in by hand, or ask your controller.`);
+
+router.get('/prefill', async (req, res) => {
+  const shared = await getSharedForm().catch(() => null);
+  if (!shared)
+    return prefillError(
+      res,
+      'The StripLink flight plan form is not set up yet.',
+      503
+    );
   res.setHeader('Cache-Control', 'no-store');
-  res.redirect(302, link);
+  res.redirect(302, buildPrefilledLink(shared, '', prefillQuery(req)));
+});
+
+router.get('/prefill/:sessionId', async (req, res) => {
+  const sessionId = validSessionParam(req.params.sessionId);
+  if (!sessionId)
+    return prefillError(res, 'That StripLink session ID does not look right.');
+  const settings = await getFormSettings(sessionId);
+  if (!settings)
+    return prefillError(
+      res,
+      `StripLink session ${sessionId} was not found.`,
+      404
+    );
+  if (!settings.form_webhook_secret)
+    return prefillError(
+      res,
+      'This session is not taking Google Form flight plans right now.',
+      403
+    );
+  const shared = await getSharedForm().catch(() => null);
+  if (!shared)
+    return prefillError(
+      res,
+      'The StripLink flight plan form is not set up yet.',
+      503
+    );
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, buildPrefilledLink(shared, sessionId, prefillQuery(req)));
 });
 
 // POST: /api/forms/pilot-panel - a pilot who filed through the form finds their ACARS panel
@@ -328,11 +352,9 @@ router.post('/pilot-panel', pilotPanelLimiter, async (req, res) => {
     !/^[A-Z0-9-]{2,16}$/.test(callsign) ||
     !/^[A-Za-z0-9_]{3,20}$/.test(roblox)
   ) {
-    return res
-      .status(400)
-      .json({
-        error: 'Enter the callsign and Roblox username you filed with.',
-      });
+    return res.status(400).json({
+      error: 'Enter the callsign and Roblox username you filed with.',
+    });
   }
   const flight = await mainDb
     .selectFrom('flights')
