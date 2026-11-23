@@ -28,6 +28,7 @@ import profileContentRouter from './profileContent.js';
 import surveysRouter from './surveys.js';
 import externalAcarsProvidersRouter from './externalAcarsProviders.js';
 import chartForensicsRouter from './chartForensics.js';
+import popupsRouter from './popups.js';
 
 const router = express.Router();
 
@@ -56,6 +57,7 @@ router.use('/profile-content', profileContentRouter);
 router.use('/surveys', surveysRouter);
 router.use('/external-acars-providers', externalAcarsProvidersRouter);
 router.use('/chart-forensics', chartForensicsRouter);
+router.use('/popups', popupsRouter);
 
 // GET: /api/admin/statistics/forecast - 30-day activity forecast
 router.get(
