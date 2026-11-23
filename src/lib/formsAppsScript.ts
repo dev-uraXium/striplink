@@ -17,6 +17,9 @@ const STRIPLINK_URL = '${webhookUrl}';
 const STRIPLINK_SECRET = '${secret}';
 
 function onFormSubmit(e) {
+  if (!e || !e.response) {
+    throw new Error('onFormSubmit runs by itself when someone submits the form. Run the setup function from the dropdown instead.');
+  }
   const response = e.response;
   const answers = {};
   response.getItemResponses().forEach(function (item) {
@@ -116,6 +119,9 @@ const SESSION_QUESTION = 'StripLink session';
 const PLACEHOLDER = '__STRIPLINK_SESSION__';
 
 function onFormSubmit(e) {
+  if (!e || !e.response) {
+    throw new Error('onFormSubmit runs by itself when someone submits the form. Run the setup function from the dropdown instead.');
+  }
   const response = e.response;
   const answers = {};
   response.getItemResponses().forEach(function (item) {
