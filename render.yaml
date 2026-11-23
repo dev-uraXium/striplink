@@ -26,23 +26,23 @@ services:
         generateValue: true
       - key: CHART_SUBJECT_SECRET
         generateValue: true
+      - key: DB_ENCRYPTION_KEY
+        generateValue: true
+      - key: PROXY_SECRET          # copy this value to the Cloudflare Worker's PROXY_SECRET
+        generateValue: true
       # Fill these in on the Render dashboard when the Blueprint asks:
-      - key: FRONTEND_URL          # the public URL (the Cloudflare Worker), e.g. https://striplink.<you>.workers.dev
-        sync: false
-      - key: PUBLIC_API_URL        # same as FRONTEND_URL (used for the Google Forms webhook URL)
-        sync: false
-      - key: PROXY_SECRET          # same value as the Worker's PROXY_SECRET
-        sync: false
+      - key: FRONTEND_URL          # public URL = the Cloudflare Worker
+        value: https://striplink.dev-uraxium.workers.dev
+      - key: PUBLIC_API_URL        # used for the Google Forms webhook URL
+        value: https://striplink.dev-uraxium.workers.dev
       - key: POSTGRES_DB_URL       # Neon → Connect → pooled connection string
-        sync: false
-      - key: DB_ENCRYPTION_KEY     # 128 hex chars
         sync: false
       - key: DISCORD_CLIENT_ID
         sync: false
       - key: DISCORD_CLIENT_SECRET
         sync: false
-      - key: DISCORD_REDIRECT_URI  # https://<your host>/api/auth/discord/callback
-        sync: false
+      - key: DISCORD_REDIRECT_URI
+        value: https://striplink.dev-uraxium.workers.dev/api/auth/discord/callback
       - key: ADMIN_IDS             # your Discord user id(s), comma separated
         sync: false
 

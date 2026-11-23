@@ -11,15 +11,20 @@ const ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
 const ALGORITHM = 'aes-256-gcm';
 const IP_HASH_SECRET = process.env.IP_HASH_SECRET;
 
-if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 128) {
-  throw new Error('DB_ENCRYPTION_KEY must be 128 characters long');
+// Upstream format: 128 chars (first 32 bytes used as the key). Any other
+// secret of 32+ chars (e.g. Render's generateValue) is hashed to a 32-byte key.
+if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length < 32) {
+  throw new Error('DB_ENCRYPTION_KEY must be at least 32 characters long');
 }
 
 if (!IP_HASH_SECRET) {
   throw new Error('IP_HASH_SECRET env var is required');
 }
 
-const key = Buffer.from(ENCRYPTION_KEY, 'utf8').subarray(0, 32);
+const key =
+  ENCRYPTION_KEY.length === 128
+    ? Buffer.from(ENCRYPTION_KEY, 'utf8').subarray(0, 32)
+    : crypto.createHash('sha256').update(ENCRYPTION_KEY, 'utf8').digest();
 
 export function hashIp(plaintextIp: string): string {
   return crypto
