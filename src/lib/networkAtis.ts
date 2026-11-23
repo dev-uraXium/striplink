@@ -36,7 +36,13 @@ export interface NetworkAtisInput {
   frequencies: AirportFrequencies;
   controllers: NetworkController[];
   atisText: string;
+  /** The session's Google Form link (the Submit Link). */
+  formLink?: string | null;
+  /** Also point pilots at the PFTracker flight plan generator. */
+  includePfTracker?: boolean;
 }
+
+export const PFTRACKER_FILE_URL = 'https://canary.project-flight.com/flight-plan/create';
 
 /** "London Gatwick International Airport" -> "LONDON GATWICK" */
 export function networkAirportName(name: string, icao: string) {
@@ -98,5 +104,9 @@ export function buildNetworkAtis(input: NetworkAtisInput): string {
 
   const header = `${networkAirportName(input.airportName, icao)} ${icao}`;
   const body = cleanAtisBody(input.atisText);
-  return [header, '', ...lines, '', '```' + body + '```'].join('\n');
+  // Flight plan filing links are the only links the network allows. <> stops Discord previews.
+  const filing: string[] = [];
+  if (input.formLink) filing.push(`FILE YOUR FLIGHT PLAN: <${input.formLink}>`);
+  if (input.includePfTracker) filing.push(`OR PLAN ON PFTRACKER: <${PFTRACKER_FILE_URL}>`);
+  return [header, '', ...lines, '', '```' + body + '```', ...(filing.length ? ['', ...filing] : [])].join('\n');
 }

@@ -55,4 +55,19 @@ describe('network ATIS format', () => {
     expect(networkAirportName('Cardiff Airport', 'EGFF')).toBe('CARDIFF');
     expect(cleanAtisBody('qnh 1021 **bold** ✈️ see https://x.com/y')).toBe('QNH 1021 BOLD SEE');
   });
+
+  it('adds filing links (only those) below the ATIS when asked', () => {
+    const out = buildNetworkAtis({
+      ...gatwick,
+      atisText: atis,
+      controllers: [{ id: '111111111111111111', position: 'TWR' }],
+      formLink: 'https://docs.google.com/forms/d/e/X/viewform?usp=pp_url&entry.1=abc12345',
+      includePfTracker: true,
+    });
+    expect(out.endsWith(
+      '```\n\nFILE YOUR FLIGHT PLAN: <https://docs.google.com/forms/d/e/X/viewform?usp=pp_url&entry.1=abc12345>\nOR PLAN ON PFTRACKER: <https://canary.project-flight.com/flight-plan/create>'
+    )).toBe(true);
+    const plain = buildNetworkAtis({ ...gatwick, atisText: atis, controllers: [] });
+    expect(plain.endsWith('```')).toBe(true);
+  });
 });

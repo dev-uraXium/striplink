@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Loader, Info, RefreshCw, Copy, MessageSquare } from 'lucide-react';
 import { buildNetworkAtis } from '../../lib/networkAtis';
+import { fetchPilotFormLink } from '../../utils/fetch/forms';
 import type { SessionUser } from '../../types/session';
 import { useData } from '../../hooks/data/useData';
 import { fetchMetar } from '../../utils/fetch/metar';
@@ -52,6 +53,16 @@ export default function ATIS({
 }: ATISProps) {
   const { airportRunways, fetchAirportData, fetchedAirports, airports } = useData();
   const [networkCopied, setNetworkCopied] = useState(false);
+  const [formLink, setFormLink] = useState<string | null>(null);
+  const [includeLinks, setIncludeLinks] = useState(true);
+  useEffect(() => {
+    if (!open || !sessionId) return;
+    let cancelled = false;
+    fetchPilotFormLink(sessionId).then((url) => !cancelled && setFormLink(url));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, sessionId]);
   const [ident, setIdent] = useState<string>('A');
   const [selectedApproaches, setSelectedApproaches] = useState<string[]>([
     'ILS',
@@ -416,9 +427,11 @@ export default function ATIS({
             frequencies: airport.allFrequencies ?? {},
             controllers: sessionUsers.map((u) => ({ id: u.id, position: u.position })),
             atisText,
+            formLink: includeLinks ? formLink : null,
+            includePfTracker: includeLinks,
           })
         : '',
-    [atisText, airport, icao, sessionUsers]
+    [atisText, airport, icao, sessionUsers, includeLinks, formLink]
   );
 
   const copyNetworkAtis = async () => {
@@ -511,6 +524,13 @@ export default function ATIS({
             <div className="whitespace-pre-wrap break-words rounded-2xl border border-zinc-800 bg-black p-4 font-mono text-xs text-zinc-300">
               {networkAtis}
             </div>
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <Checkbox
+                checked={includeLinks}
+                onCheckedChange={(checked) => setIncludeLinks(checked === true)}
+              />
+              Add flight plan filing links (Google Form{formLink ? '' : ' when set up'} and PFTracker)
+            </label>
             <p className="mt-2 text-xs text-zinc-500">
               Positions come from what each controller picked on the board. Pick yours in the position menu so the
               right line mentions you.
