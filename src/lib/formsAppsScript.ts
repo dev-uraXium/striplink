@@ -171,12 +171,42 @@ function setupStripLinkForm() {
   form.setCollectEmail(false);
   form.setAllowResponseEdits(false);
 
+  addPfTrackerImport();
+
   ScriptApp.getProjectTriggers()
     .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
     .forEach(function (t) { ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('onFormSubmit').forForm(form).onFormSubmit().create();
 
   registerWithStripLink();
+}
+
+/**
+ * Adds the opt-in "Import my PFTracker flight plan?" question after the Roblox username.
+ * Yes: the form submits straight away and StripLink copies the pilot's own PFTracker plan.
+ * No: the pilot continues to the flight plan page as usual. Safe to run again.
+ */
+function addPfTrackerImport() {
+  const form = FormApp.getActiveForm();
+  const items = form.getItems();
+  if (items.some(function (i) { return /pftracker/i.test(i.getTitle()); })) {
+    console.log('PFTracker import question is already there.');
+    return;
+  }
+  const user = items.filter(function (i) { return i.getTitle() === 'Roblox username'; })[0];
+  if (!user) throw new Error('Add a "Roblox username" question first.');
+  const question = form.addMultipleChoiceItem()
+    .setTitle('Import my PFTracker flight plan?')
+    .setHelpText('Filed your plan on PFTracker? Pick Yes and StripLink copies it from there using your Roblox username. Nothing is imported unless you pick Yes.')
+    .setRequired(true);
+  const page = form.addPageBreakItem().setTitle('Flight plan');
+  question.setChoices([
+    question.createChoice('Yes, use my PFTracker flight plan', FormApp.PageNavigationType.SUBMIT),
+    question.createChoice('No, I will fill it in here', FormApp.PageNavigationType.CONTINUE),
+  ]);
+  form.moveItem(question, user.getIndex() + 1);
+  form.moveItem(page, user.getIndex() + 2);
+  console.log('Added the PFTracker import question.');
 }
 
 /** Tells StripLink this form's pre-filled link. Run again if you rename the session question. */
