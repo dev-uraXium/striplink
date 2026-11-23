@@ -171,8 +171,6 @@ function setupStripLinkForm() {
   form.setCollectEmail(false);
   form.setAllowResponseEdits(false);
 
-  addPfTrackerImport();
-
   ScriptApp.getProjectTriggers()
     .filter(function (t) { return t.getHandlerFunction() === 'onFormSubmit'; })
     .forEach(function (t) { ScriptApp.deleteTrigger(t); });
@@ -182,6 +180,8 @@ function setupStripLinkForm() {
 }
 
 /**
+ * NOT USED: Project Flight's API refuses server requests (Cloudflare challenge), so the
+ * import can't fetch plans. Kept for if PF ever offers official access.
  * Adds the opt-in "Import my PFTracker flight plan?" question after the Roblox username.
  * Yes: the form submits straight away and StripLink copies the pilot's own PFTracker plan.
  * No: the pilot continues to the flight plan page as usual. Safe to run again.
