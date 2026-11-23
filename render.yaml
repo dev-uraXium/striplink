@@ -1,5 +1,5 @@
 # Render Blueprint — one free Docker web service + one free Key Value (Redis).
-# Postgres lives on Supabase (Render's free Postgres expires after 30 days).
+# Postgres lives on Neon (Render free Postgres expires after 30 days). Public traffic comes in via cloudflare/worker.js.
 # Deploy: Render dashboard → New → Blueprint → pick this repo.
 services:
   - type: web
@@ -33,7 +33,7 @@ services:
         sync: false
       - key: PROXY_SECRET          # same value as the Worker's PROXY_SECRET
         sync: false
-      - key: POSTGRES_DB_URL       # Supabase → Connect → Session pooler URI
+      - key: POSTGRES_DB_URL       # Neon → Connect → pooled connection string
         sync: false
       - key: DB_ENCRYPTION_KEY     # 128 hex chars
         sync: false

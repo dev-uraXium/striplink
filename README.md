@@ -66,18 +66,26 @@ Optional integrations still work if you supply your own keys: ChartFox, VATSIM, 
 
 ## Deploying
 
-### Free: Render + Supabase (what striplink.onrender.com runs on)
+### Free: Cloudflare Worker + Render + Neon (what striplink.dev-uraxium.workers.dev runs on)
 
-1. **Supabase** → new project → *Connect* → copy the **Session pooler** URI (Render is IPv4-only, the direct URI is IPv6). Tables are created automatically on first boot.
-2. **Render** → *New → Blueprint* → pick this repo. `render.yaml` creates the web service (Docker) and a free Key Value (Redis). Fill in the prompted vars:
-   - `FRONTEND_URL` = `https://<service>.onrender.com`
-   - `POSTGRES_DB_URL` = the Supabase pooler URI
+```
+browser ──► Cloudflare Worker (cloudflare/worker.js) ──► Render web service (Docker) ──► Neon Postgres
+            same-domain proxy, WebSockets,                 + Render Key Value (Redis)
+            edge cache, keep-alive cron
+```
+
+1. **Neon** → new project → *Connect* → copy the **pooled** connection string. Tables are created on first boot.
+2. **Render** → *New → Blueprint* → pick this repo. `render.yaml` creates the web service and a free Key Value (Redis). Fill in:
+   - `FRONTEND_URL` and `PUBLIC_API_URL` = your Worker URL, e.g. `https://striplink.<subdomain>.workers.dev`
+   - `POSTGRES_DB_URL` = the Neon string
    - `DB_ENCRYPTION_KEY` = `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
+   - `PROXY_SECRET` = any long random string (also goes on the Worker)
    - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` = `<FRONTEND_URL>/api/auth/discord/callback` (add the same URL in the Discord developer portal → OAuth2 → Redirects)
    - `ADMIN_IDS` = your Discord user id
-3. If your service URL isn't `striplink.onrender.com`, change `VITE_SERVER_URL` / `PUBLIC_SITE_URL` in `.env.vite.production` and push — the frontend bakes it in at build time.
+3. **Cloudflare** → Workers & Pages → *Create → Import a repository* → this repo, root directory `cloudflare`. Then on the Worker → Settings: variable `ORIGIN` = your Render URL, secret `PROXY_SECRET` = same as on Render. `wrangler.toml` adds a 10-minute cron that keeps Render awake.
+4. If your Worker URL differs, change `VITE_SERVER_URL` / `PUBLIC_SITE_URL` in `.env.vite.production` and push (the frontend bakes it in at build time).
 
-Free-tier caveats: the service sleeps after 15 min without traffic (first request then takes ~1 min), and Supabase pauses projects after a week with no activity. Live sockets keep it awake while a session is open.
+The keep-alive cron uses ~730 of Render's 750 free instance hours a month, so run only one free Render service. Neon scales to zero when idle and wakes in under a second.
 
 ### Anywhere else (Docker)
 

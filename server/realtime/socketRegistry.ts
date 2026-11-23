@@ -68,8 +68,15 @@ export function recordSocketCountsSnapshot(): void {
     samples.push({ namespaceId: id, connected: count });
   }
 
+  // Skip DB writes while nobody is connected (after one all-zero row), so a
+  // serverless Postgres (Neon free tier) can scale to zero when idle.
+  const allIdle = samples.every((s) => s.connected === 0);
+  if (allIdle && lastPersistWasIdle) return;
+  lastPersistWasIdle = allIdle;
   void persistWebsocketSnapshots(samples);
 }
+
+let lastPersistWasIdle = false;
 
 setInterval(recordSocketCountsSnapshot, 5000);
 
