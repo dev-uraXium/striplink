@@ -1,0 +1,1248 @@
+import { apiFetch } from '../apiFetch.js';
+import { apiError } from './error.js';
+import type { Settings } from '../../types/settings';
+import type { Feedback, FeedbackStats } from './feedback';
+
+const API_BASE_URL = import.meta.env.VITE_SERVER_URL || '';
+
+export interface DailyStats {
+  date: string;
+  logins_count: number;
+  new_sessions_count: number;
+  new_flights_count: number;
+  new_users_count: number;
+}
+
+export interface TotalStats {
+  total_logins: number;
+  total_sessions: number;
+  total_flights: number;
+  total_users: number;
+}
+
+export type AdminStats = {
+  totals: {
+    total_users: number;
+    total_sessions: number;
+    total_flights: number;
+    total_logins: number;
+  };
+  daily: DailyStats[];
+  periodTotals?: {
+    total_logins: number;
+    total_sessions: number;
+    total_flights: number;
+    total_users: number;
+  };
+};
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  discriminator: string;
+  avatar: string;
+  last_login: string;
+  ip_address: string;
+  is_vpn: boolean;
+  total_sessions_created: number;
+  current_sessions_count: number;
+  total_minutes: number;
+  created_at: string;
+  is_admin: boolean;
+  settings?: Settings;
+  roblox_username?: string;
+  roles?: Role[];
+  cached?: boolean;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface SessionUser {
+  id: string;
+  username: string;
+  avatar: string | null;
+  joinedAt: number;
+  position: string;
+  roles?: Array<{
+    id: number;
+    name: string;
+    color: string;
+    icon: string;
+    priority: number;
+  }>;
+}
+
+export interface AdminSession {
+  session_id: string;
+  access_id: string;
+  airport_icao: string;
+  active_runway: string;
+  created_at: string;
+  created_by: string;
+  is_pfatc: boolean;
+  is_advanced_atc?: boolean;
+  arrival_runway?: string | null;
+  custom_name?: string | null;
+  feedback_enabled?: boolean | null;
+  external_session?: boolean | null;
+  developer_api_key_id?: string | null;
+  external_claim?: AdminSessionClaim | null;
+  flight_count: number;
+  username: string;
+  discriminator: string;
+  avatar: string | null;
+  active_users?: SessionUser[];
+  active_user_count?: number;
+}
+
+export interface AdminSessionClaim {
+  keyId: string;
+  keyName: string | null;
+  userId: string;
+  username: string | null;
+  claimedAt: string;
+  expiresAt: string;
+  active: boolean;
+}
+
+export interface AdminSessionUpdate {
+  type?: 'standard' | 'pfatc' | 'advanced_atc';
+  airportIcao?: string;
+  activeRunway?: string;
+  arrivalRunway?: string | null;
+  customName?: string;
+  feedbackEnabled?: boolean;
+  externalSession?: boolean | null;
+}
+
+export interface SystemInfo {
+  database: Array<{
+    schemaname: string;
+    tablename: string;
+    inserts: number;
+    updates: number;
+    deletes: number;
+  }>;
+  server: {
+    nodeVersion: string;
+    uptime: number;
+    memoryUsage: {
+      rss: number;
+      heapTotal: number;
+      heapUsed: number;
+      external: number;
+      arrayBuffers: number;
+    };
+    platform: string;
+  };
+}
+
+export interface AuditLog {
+  id: number;
+  admin_id: string;
+  admin_username: string;
+  action_type: string;
+  target_user_id?: string;
+  target_username?: string;
+  details: Record<string, unknown>;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+}
+
+export interface AuditLogsResponse {
+  logs: AuditLog[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface RevealIPResponse {
+  userId: string;
+  username: string;
+  ip_address: string;
+}
+
+export interface RevealIPHistoryEntry {
+  hash: string;
+  ip_address: string | null;
+  is_vpn: boolean;
+  first_seen: string;
+  last_seen: string;
+  seen_count: number;
+}
+
+export interface RevealIPHistoryResponse {
+  userId: string;
+  username: string;
+  history: RevealIPHistoryEntry[];
+}
+
+export interface Ban {
+  id: number;
+  user_id?: string | null;
+  ip_address?: string | null;
+  username?: string | null;
+  target_username?: string | null;
+  reason: string;
+  banned_by: string;
+  banned_by_username?: string | null;
+  banned_by_avatar?: string | null;
+  banned_at: string;
+  expires_at?: string | null;
+  active: boolean;
+}
+
+export interface Pagination {
+  page: number;
+  limit: number;
+  total: number;
+  pages: number;
+}
+
+export interface Notification {
+  id: number;
+  type: 'info' | 'warning' | 'success' | 'error';
+  text: string;
+  show: boolean;
+  custom_color?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description: string;
+  permissions: Record<string, boolean>;
+  color: string;
+  icon: string;
+  priority: number;
+  user_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserWithRole extends AdminUser {
+  role_id?: number;
+  role_name?: string;
+  role_permissions?: Record<string, boolean>;
+  roles?: Role[];
+}
+
+export interface AppVersion {
+  version: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface ChatReport {
+  id: number;
+  session_id: string;
+  message_id: number;
+  reporter_user_id: string;
+  reported_user_id: string;
+  message: string;
+  reason: string;
+  created_at: string;
+  status?: 'pending' | 'resolved';
+  avatar?: string;
+  reported_username?: string;
+  reporter_username?: string;
+  reported_avatar?: string;
+}
+
+export interface ChatReportsResponse {
+  reports: ChatReport[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface FlightLog {
+  id: number;
+  user_id: string;
+  username: string;
+  session_id: string;
+  action: 'add' | 'update' | 'delete';
+  flight_id: string;
+  old_data: object | null;
+  new_data: object | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface FlightLogsResponse {
+  logs: FlightLog[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface ApiLog {
+  id: number;
+  user_id: string | null;
+  username: string | null;
+  method: string;
+  path: string;
+  status_code: number;
+  response_time: number;
+  ip_address: string | null;
+  user_agent: string | null;
+  request_body: string | null;
+  response_body: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ApiLogsResponse {
+  logs: ApiLog[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export interface ApiLogStats {
+  totalRequests: number;
+  averageResponseTime: number;
+  errorRate: number;
+  topEndpoints: Array<{
+    path: string;
+    count: number;
+    avgResponseTime: number;
+  }>;
+  statusCodeDistribution: Array<{
+    statusCode: number;
+    count: number;
+  }>;
+  dailyStats: Array<{
+    date: string;
+    requestCount: number;
+    errorCount: number;
+    avgResponseTime: number;
+  }>;
+}
+
+export interface ControllerRatingStats {
+  topRated: Array<{
+    controller_id: string;
+    username: string;
+    avatar: string | null;
+    avg_rating: number;
+    rating_count: number;
+  }>;
+  mostRated: Array<{
+    controller_id: string;
+    username: string;
+    avatar: string | null;
+    rating_count: number;
+    avg_rating: number;
+  }>;
+  topPilots: Array<{
+    pilot_id: string;
+    username: string;
+    avatar: string | null;
+    rating_count: number;
+  }>;
+}
+
+export interface DailyRatingStats {
+  date: string;
+  count: number;
+  avg_rating: number;
+}
+
+async function makeAdminRequest(endpoint: string, options?: RequestInit) {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin${endpoint}`, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    ...options,
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Admin access required');
+    }
+    if (response.status === 401) {
+      throw new Error('Authentication required');
+    }
+    await apiError(response, `HTTP ${response.status}: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchAdminStatistics(
+  days: number = 30
+): Promise<AdminStats> {
+  return makeAdminRequest(`/statistics?days=${days}`);
+}
+
+export async function fetchAdminUsers(
+  page: number = 1,
+  limit: number = 50,
+  search: string = '',
+  filterAdmin: string = 'all'
+): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...(search && { search }),
+    filterAdmin,
+  });
+  return makeAdminRequest(`/users?${params.toString()}`);
+}
+
+export interface AdminSessionsResponse {
+  sessions: AdminSession[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export async function fetchAdminSessions(
+  page: number = 1,
+  limit: number = 100,
+  search: string = ''
+): Promise<AdminSessionsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+  });
+  if (search) params.append('search', search);
+  return makeAdminRequest(`/sessions?${params.toString()}`);
+}
+
+export interface EventModeState {
+  pfatcEventMode: boolean;
+  aatcEventMode: boolean; // AATC disabled but kept in type for backend compatibility
+}
+
+export async function fetchEventMode(): Promise<EventModeState> {
+  return makeAdminRequest('/sessions/event-mode');
+}
+
+export async function setEventMode(
+  state: Partial<EventModeState>
+): Promise<EventModeState> {
+  return makeAdminRequest('/sessions/event-mode', {
+    method: 'POST',
+    body: JSON.stringify(state),
+  });
+}
+
+export async function revealUserIP(userId: string): Promise<RevealIPResponse> {
+  return makeAdminRequest(`/users/${userId}/reveal-ip`, {
+    method: 'POST',
+  });
+}
+
+export async function revealUserIPHistory(
+  userId: string
+): Promise<RevealIPHistoryResponse> {
+  return makeAdminRequest(`/users/${userId}/reveal-ip-history`, {
+    method: 'POST',
+  });
+}
+
+export async function revealAuditLogIP(
+  logId: number
+): Promise<{ logId: number; ip_address: string }> {
+  return makeAdminRequest(`/audit-logs/${logId}/reveal-ip`, {
+    method: 'POST',
+  });
+}
+
+export async function banUser({
+  userId,
+  ip,
+  username,
+  reason,
+  expiresAt,
+}: {
+  userId?: string;
+  ip?: string;
+  username: string;
+  reason: string;
+  expiresAt?: string;
+}) {
+  return makeAdminRequest('/bans/ban', {
+    method: 'POST',
+    body: JSON.stringify({ userId, ip, username, reason, expiresAt }),
+  });
+}
+
+export async function unbanUser(userIdOrIp: string) {
+  return makeAdminRequest('/bans/unban', {
+    method: 'POST',
+    body: JSON.stringify({ userIdOrIp }),
+  });
+}
+
+export async function fetchAllBans(
+  page: number = 1,
+  limit: number = 50
+): Promise<{ bans: Ban[]; pagination: Pagination }> {
+  return makeAdminRequest(`/bans?page=${page}&limit=${limit}`);
+}
+
+export async function fetchAuditLogs(
+  page: number = 1,
+  limit: number = 50,
+  filters: {
+    adminId?: string;
+    actionType?: string;
+    targetUserId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  } = {}
+): Promise<AuditLogsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...Object.fromEntries(
+      Object.entries(filters).filter(
+        ([, value]) => value != null && value !== ''
+      )
+    ),
+  });
+
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/audit-logs?${params}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch audit logs');
+  }
+
+  return response.json();
+}
+
+export async function deleteAdminSession(
+  sessionId: string
+): Promise<{ message: string; sessionId: string }> {
+  return makeAdminRequest(`/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function updateAdminSession(
+  sessionId: string,
+  updates: AdminSessionUpdate
+): Promise<Partial<AdminSession>> {
+  return makeAdminRequest(`/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function releaseAdminSessionClaim(
+  sessionId: string
+): Promise<{ message: string; sessionId: string }> {
+  return makeAdminRequest(`/sessions/${sessionId}/claim`, {
+    method: 'DELETE',
+  });
+}
+
+export async function logSessionJoin(
+  sessionId: string
+): Promise<{ message: string; sessionId: string }> {
+  return makeAdminRequest(`/sessions/${sessionId}/join`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchNotifications(): Promise<Notification[]> {
+  const response = await makeAdminRequest('/notifications');
+  return response;
+}
+
+export async function addNotification(
+  notification: Omit<Notification, 'id' | 'created_at' | 'updated_at'>
+): Promise<Notification> {
+  const response = await makeAdminRequest('/notifications', {
+    method: 'POST',
+    body: JSON.stringify(notification),
+  });
+  return response;
+}
+
+export async function updateNotification(
+  id: number,
+  notification: Partial<Omit<Notification, 'id' | 'created_at' | 'updated_at'>>
+): Promise<Notification> {
+  const response = await makeAdminRequest(`/notifications/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(notification),
+  });
+  return response;
+}
+
+export async function deleteNotification(id: number): Promise<void> {
+  await makeAdminRequest(`/notifications/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function fetchRoles(): Promise<Role[]> {
+  return makeAdminRequest('/roles');
+}
+
+export async function createRole(roleData: {
+  name: string;
+  description: string;
+  permissions: Record<string, boolean>;
+  color?: string;
+  icon?: string;
+  priority?: number;
+}): Promise<Role> {
+  return makeAdminRequest('/roles', {
+    method: 'POST',
+    body: JSON.stringify(roleData),
+  });
+}
+
+export async function updateRole(
+  id: number,
+  roleData: {
+    name?: string;
+    description?: string;
+    permissions?: Record<string, boolean>;
+    color?: string;
+    icon?: string;
+    priority?: number;
+  }
+): Promise<Role> {
+  return makeAdminRequest(`/roles/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(roleData),
+  });
+}
+
+export async function updateRolePriorities(
+  rolePriorities: Array<{ id: number; priority: number }>
+): Promise<boolean> {
+  return makeAdminRequest('/roles/priorities', {
+    method: 'PUT',
+    body: JSON.stringify({ rolePriorities }),
+  });
+}
+
+export async function deleteRole(id: number): Promise<void> {
+  return makeAdminRequest(`/roles/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function assignRoleToUser(
+  userId: string,
+  roleId: number
+): Promise<void> {
+  return makeAdminRequest(`/roles/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ userId, roleId }),
+  });
+}
+
+export async function removeRoleFromUser(
+  userId: string,
+  roleId: number
+): Promise<void> {
+  return makeAdminRequest(`/roles/remove`, {
+    method: 'POST',
+    body: JSON.stringify({ userId, roleId }),
+  });
+}
+
+export async function fetchUsersWithRoles(): Promise<UserWithRole[]> {
+  return makeAdminRequest('/roles/users');
+}
+
+export async function fetchAppVersion(): Promise<AppVersion> {
+  return makeAdminRequest('/version');
+}
+
+export async function fetchChatReports(
+  page = 1,
+  limit = 50,
+  filterReporter?: string
+): Promise<ChatReportsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+  });
+  if (filterReporter) params.append('reporter', filterReporter);
+
+  const res = await apiFetch(
+    `${API_BASE_URL}/api/admin/chat-reports?${params}`,
+    {
+      credentials: 'include',
+    }
+  );
+  if (!res.ok) await apiError(res, 'Failed to fetch chat reports');
+  return res.json();
+}
+
+export async function updateChatReportStatus(
+  reportId: number,
+  status: 'pending' | 'resolved'
+): Promise<void> {
+  const res = await apiFetch(
+    `${API_BASE_URL}/api/admin/chat-reports/${reportId}`,
+    {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    }
+  );
+  if (!res.ok) await apiError(res, 'Failed to update report status');
+}
+
+export async function deleteChatReport(reportId: number): Promise<void> {
+  const res = await apiFetch(
+    `${API_BASE_URL}/api/admin/chat-reports/${reportId}`,
+    {
+      method: 'DELETE',
+      credentials: 'include',
+    }
+  );
+  if (!res.ok) await apiError(res, 'Failed to delete report');
+}
+
+export async function fetchFlightLogs(
+  page: number = 1,
+  limit: number = 50,
+  filters: {
+    general?: string;
+    user?: string;
+    action?: string;
+    session?: string;
+    flightId?: string;
+    date?: string;
+    text?: string;
+  } = {}
+): Promise<FlightLogsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...Object.fromEntries(
+      Object.entries(filters).filter(
+        ([, value]) => value != null && value !== ''
+      )
+    ),
+  });
+
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/flight-logs?${params}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch flight logs');
+  }
+
+  return response.json();
+}
+
+export async function revealFlightLogIP(
+  logId: number
+): Promise<{ logId: number; ip_address: string }> {
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/flight-logs/reveal-ip/${logId}`,
+    {
+      method: 'POST',
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to reveal flight log IP');
+  }
+
+  return response.json();
+}
+
+export async function fetchFeedbackStats(): Promise<FeedbackStats> {
+  return makeAdminRequest('/feedback/stats');
+}
+
+export async function deleteFeedback(id: number): Promise<Feedback> {
+  return makeAdminRequest(`/feedback/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function fetchApiLogs(
+  page: number = 1,
+  limit: number = 50,
+  filters: {
+    userId?: string;
+    method?: string;
+    path?: string;
+    statusCode?: number;
+    dateFrom?: string;
+    dateTo?: string;
+    search?: string;
+  } = {}
+): Promise<ApiLogsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...Object.fromEntries(
+      Object.entries(filters).filter(
+        ([, value]) => value != null && value !== ''
+      )
+    ),
+  });
+
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/api-logs?${params}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch API logs');
+  }
+
+  return response.json();
+}
+
+export async function fetchApiLogStats(days: number = 7): Promise<ApiLogStats> {
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/api-logs/stats?days=${days}`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch API log stats');
+  }
+
+  return response.json();
+}
+
+export async function fetchApiLogById(id: number): Promise<ApiLog> {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin/api-logs/${id}`, {
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch API log');
+  }
+
+  return response.json();
+}
+
+export async function fetchApiLogStats24h(): Promise<
+  Array<{
+    hour: string;
+    successful: number;
+    clientErrors: number;
+    serverErrors: number;
+    other: number;
+  }>
+> {
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/admin/api-logs/stats-24h`,
+    {
+      credentials: 'include',
+    }
+  );
+
+  if (!response.ok) {
+    await apiError(response, 'Failed to fetch API log stats for last 24 hours');
+  }
+
+  return response.json();
+}
+
+export async function fetchControllerRatingStats(): Promise<ControllerRatingStats> {
+  return makeAdminRequest('/ratings/stats');
+}
+
+export async function fetchControllerDailyRatingStats(
+  days: number = 30
+): Promise<DailyRatingStats[]> {
+  return makeAdminRequest(`/ratings/daily?days=${days}`);
+}
+
+export interface AdminControllerRating {
+  id: number;
+  rating: number;
+  comment: string | null;
+  session_id: string | null;
+  created_at: string;
+  controller_id: string;
+  controller_username: string | null;
+  controller_avatar: string | null;
+  pilot_id: string;
+  pilot_username: string | null;
+  pilot_avatar: string | null;
+  reported: boolean;
+  report_reason: string | null;
+  reported_at: string | null;
+  automod_flagged: boolean;
+  automod_reason: string | null;
+}
+
+export interface AdminControllerRatingsResponse {
+  ratings: AdminControllerRating[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
+export async function fetchAdminControllerRatings(
+  page: number = 1,
+  limit: number = 25,
+  search: string = '',
+  rating?: number,
+  flagged?: 'reported' | 'automod',
+  hasComment?: boolean
+): Promise<AdminControllerRatingsResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...(search && { search }),
+    ...(rating !== undefined && { rating: rating.toString() }),
+    ...(flagged && { flagged }),
+    ...(hasComment && { hasComment: 'true' }),
+  });
+  return makeAdminRequest(`/ratings?${params.toString()}`);
+}
+
+export async function dismissControllerRatingReport(id: number): Promise<void> {
+  await makeAdminRequest(`/ratings/${id}/dismiss-report`, {
+    method: 'PATCH',
+  });
+}
+
+export async function dismissAutomodFlag(id: number): Promise<void> {
+  await makeAdminRequest(`/ratings/${id}/dismiss-automod`, {
+    method: 'PATCH',
+  });
+}
+
+export async function deleteAdminControllerRating(id: number): Promise<void> {
+  await makeAdminRequest(`/ratings/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export interface VpnException {
+  id: number;
+  user_id: string;
+  username: string;
+  added_by: string;
+  added_by_username: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  avatar?: string | null;
+}
+
+export interface VpnGateResponse {
+  enabled: boolean;
+  exceptions: VpnException[];
+  pagination: Pagination;
+}
+
+export async function fetchVpnGate(
+  page: number = 1,
+  limit: number = 50,
+  search: string = ''
+): Promise<VpnGateResponse> {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...(search && { search }),
+  });
+  return makeAdminRequest(`/bans/vpn-gate?${params.toString()}`);
+}
+
+export async function toggleVpnGate(
+  enabled: boolean
+): Promise<{ success: boolean; enabled: boolean }> {
+  return makeAdminRequest('/bans/vpn-gate/toggle', {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function addVpnException({
+  userId,
+  notes,
+}: {
+  userId: string;
+  notes?: string;
+}): Promise<{ success: boolean; exception: VpnException }> {
+  return makeAdminRequest('/bans/vpn-gate/exceptions', {
+    method: 'POST',
+    body: JSON.stringify({ userId, notes }),
+  });
+}
+
+export async function removeVpnException(
+  userId: string
+): Promise<{ success: boolean }> {
+  return makeAdminRequest(
+    `/bans/vpn-gate/exceptions/${encodeURIComponent(userId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}
+
+export interface IpLocationResult {
+  country?: string;
+  country_code?: string;
+  city?: string;
+  region?: string;
+}
+
+export async function fetchIpLocation(ip: string): Promise<IpLocationResult> {
+  return makeAdminRequest(`/bans/ip-location/${encodeURIComponent(ip)}`);
+}
+
+// ─── Alt Detection ────────────────────────────────────────────────────────────
+
+export interface AltClusterBan {
+  active: boolean;
+  reason: string | null;
+  expires_at: string | null;
+  banned_at: string | null;
+}
+
+export interface IpHistoryEntry {
+  hash: string;
+  is_vpn: boolean;
+  first_seen: string;
+  last_seen: string;
+  seen_count: number;
+}
+
+export interface FingerprintHistoryEntry {
+  fingerprint_id: string;
+  first_seen: string;
+  last_seen: string;
+  seen_count: number;
+}
+
+export interface ClusterMember {
+  id: string;
+  username: string;
+  avatar: string | null;
+  discriminator: string | null;
+  created_at: string;
+  discord_created_at: string;
+  discord_account_age_days: number;
+  last_login: string | null;
+  is_vpn: boolean;
+  fingerprint_id: string | null;
+  ip_hash: string | null;
+  ip_history: IpHistoryEntry[];
+  fingerprint_history: FingerprintHistoryEntry[];
+  common_ip_count: number;
+  common_fingerprint_count: number;
+  ban: AltClusterBan | null;
+}
+
+export interface AltCluster {
+  id: string;
+  members: ClusterMember[];
+  member_count: number;
+  signals: {
+    shared_fingerprint: boolean;
+    shared_ip: boolean;
+    has_banned_member: boolean;
+    young_account_joined_after_ban: boolean;
+    vpn_overlap: boolean;
+  };
+  score: number;
+  score_label: 'low' | 'medium' | 'high' | 'critical';
+  detected_at: string;
+}
+
+export interface AltClustersResponse {
+  clusters: AltCluster[];
+  stats: {
+    total_clusters: number;
+    total_flagged_accounts: number;
+    scan_duration_ms: number;
+  };
+}
+
+export async function fetchAltClusters(
+  options: { minScore?: number } = {}
+): Promise<AltClustersResponse> {
+  const params = new URLSearchParams();
+  if (options.minScore != null)
+    params.set('minScore', String(options.minScore));
+  const qs = params.toString();
+  return makeAdminRequest(`/alts${qs ? '?' + qs : ''}`);
+}
+
+export interface AdminWebsocketNamespace {
+  id: string;
+  label: string;
+  path: string;
+  connected: number;
+  history: number[];
+  history24h: number[];
+}
+
+export interface AdminWebsocketStatsResponse {
+  namespaces: AdminWebsocketNamespace[];
+  totalConnected: number;
+  polledAt: string;
+}
+
+export async function fetchAdminWebsocketStats(): Promise<AdminWebsocketStatsResponse> {
+  return makeAdminRequest('/websockets');
+}
+
+export interface AdminDatabaseTable {
+  name: string;
+  bytes: number;
+  bytesFormatted: string;
+  rowEstimate: number;
+  retentionDays?: number;
+}
+
+export interface AdminDatabaseTableDayActivity {
+  inserted: number;
+  deleted: number;
+  bytes: number;
+  rowCount: number;
+}
+
+export interface AdminDatabaseActivityTable {
+  table: string;
+  today: AdminDatabaseTableDayActivity;
+  yesterday: AdminDatabaseTableDayActivity;
+}
+
+export interface AdminDatabaseDailyStat {
+  date: string;
+  logins: number;
+  newSessions: number;
+  newFlights: number;
+  newUsers: number;
+}
+
+export interface AdminDatabaseTableForecast {
+  table: string;
+  currentBytes: number;
+  projected30dBytes: number;
+  deltaBytes: number;
+  insertsPerDay: number;
+  deletesPerDay: number;
+  weeklyGrowthPct: number;
+  retentionDays: number | null;
+}
+
+export interface AdminDatabaseGrowthDriver {
+  key: 'flights' | 'sessions' | 'users' | 'logins';
+  label: string;
+  total: number | null;
+  last7: number;
+  prev7: number;
+  last30: number;
+  prev30: number | null;
+  change30Pct: number | null;
+  weeklyGrowthPct: number;
+  next7: number;
+  next30: number;
+  next30Low: number;
+  next30High: number;
+  peakWeekday: string | null;
+  peakFactor: number;
+  history: Array<{ date: string; value: number }>;
+  forecast: Array<{ date: string; value: number; low: number; high: number }>;
+}
+
+export interface AdminDatabaseStatsResponse {
+  tables: AdminDatabaseTable[];
+  totalBytes: number;
+  totalFormatted: string;
+  largestTable: { name: string; bytes: number; formatted: string } | null;
+  retentionPolicies: Array<{
+    table: string;
+    retentionDays: number;
+    label: string;
+  }>;
+  projection: Array<{
+    day: number;
+    date: string;
+    projectedBytes: number;
+    lowBytes: number;
+    highBytes: number;
+    linearBytes: number | null;
+  }>;
+  projected30dBytes: number;
+  projected30dLowBytes: number;
+  projected30dHighBytes: number;
+  measuredDailyNetBytes: number | null;
+  tableForecasts: AdminDatabaseTableForecast[];
+  growthDrivers: AdminDatabaseGrowthDriver[];
+  projected30dFormatted: string;
+  growthPercent30d: number;
+  dailyNetGrowthBytes: number;
+  dailyNetGrowthFormatted: string;
+  projectionMethodology: string;
+  activitySummary: {
+    today: string;
+    yesterday: string;
+    tables: AdminDatabaseActivityTable[];
+  };
+  dailyStatistics: AdminDatabaseDailyStat[];
+  polledAt: string;
+}
+
+export async function fetchAdminStatisticsForecast(): Promise<{
+  drivers: AdminDatabaseGrowthDriver[];
+}> {
+  return makeAdminRequest('/statistics/forecast');
+}
+
+export async function fetchAdminDatabaseStats(): Promise<AdminDatabaseStatsResponse> {
+  return makeAdminRequest('/database');
+}

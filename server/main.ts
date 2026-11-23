@@ -1,0 +1,446 @@
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { existsSync } from 'fs';
+import express from 'express';
+import type { RequestHandler, Response } from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import apiRoutes from './routes/index.js';
+import sitemapXmlRouter from './routes/sitemapXml.js';
+import dotenv from 'dotenv';
+import http from 'http';
+import chalk from 'chalk';
+import Redis from 'ioredis';
+import { createAdapter } from '@socket.io/redis-adapter';
+
+import { setupSessionUsersWebsocket } from './websockets/sessionUsersWebsocket.js';
+import { setupChatWebsocket } from './websockets/chatWebsocket.js';
+import { setupGlobalChatWebsocket } from './websockets/globalChatWebsocket.js';
+import { setupFlightsWebsocket } from './websockets/flightsWebsocket.js';
+import { setupOverviewWebsocket } from './websockets/overviewWebsocket.js';
+import { setupExtNetworkFlightsWebsocket } from './websockets/extNetworkFlightsWebsocket.js';
+import { setupArrivalsWebsocket } from './websockets/arrivalsWebsocket.js';
+import { setupSectorControllerWebsocket } from './websockets/sectorControllerWebsocket.js';
+import { setupVoiceChatWebsocket } from './websockets/voiceChatWebsocket.js';
+import { setupPilotChatWebsocket } from './websockets/pilotChatWebsocket.js';
+import { setupNotificationsWebsocket } from './websockets/notificationsWebsocket.js';
+
+import { startStatsFlushing } from './utils/statisticsCache.js';
+import { updateLeaderboard } from './db/leaderboard.js';
+import { startFlightLogsCleanup } from './db/flightLogs.js';
+import { apiLogger, cleanupOldApiLogs } from './middleware/apiLogger.js';
+import { securityMiddleware } from './middleware/security.js';
+import { platformIdentityCors } from './middleware/platformIdentityCors.js';
+import { httpErrorHandler } from './middleware/httpErrorHandler.js';
+import {
+  applyImmutableAsset,
+  filenameLooksContentHashed,
+} from './utils/httpCache.js';
+import { cleanupOldDeveloperUsage } from './db/developer.js';
+import { cleanupOldWebsocketSnapshots } from './db/websocketSnapshots.js';
+import { startDatabaseMetricsCapture } from './db/databaseMetrics.js';
+import { registerAdminSocketNamespace } from './realtime/socketRegistry.js';
+import posthogClient, { initTelemetry } from './utils/posthog.js';
+import { setupExpressErrorHandler } from 'posthog-node';
+import { allowedOrigins } from './utils/allowedOrigins.js';
+import { startFormsPoller } from './forms/poller.js';
+
+dotenv.config({
+  path:
+    process.env.NODE_ENV === 'production'
+      ? '.env.production'
+      : '.env.development',
+});
+initTelemetry();
+console.log(chalk.bgBlue('NODE_ENV:'), process.env.NODE_ENV);
+// StripLink: with DEV_LOGIN on (never in production) you can run without a Discord app
+const devLoginOnly =
+  process.env.DEV_LOGIN === 'true' && process.env.NODE_ENV !== 'production';
+const requiredEnv = [
+  ...(devLoginOnly
+    ? []
+    : ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_REDIRECT_URI']),
+  'FRONTEND_URL',
+  'JWT_SECRET',
+  'POSTGRES_DB_URL',
+  'REDIS_URL',
+  'PORT',
+];
+const missingEnv = requiredEnv.filter(
+  (key) => !process.env[key] || process.env[key] === ''
+);
+if (missingEnv.length > 0) {
+  console.error(
+    'Missing required environment variables:',
+    missingEnv.join(', ')
+  );
+  process.exit(1);
+}
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 9901;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const astroEntryCandidates = [
+  path.join(__dirname, '../astro/dist/server/entry.mjs'),
+  path.join(__dirname, '../../astro/dist/server/entry.mjs'),
+];
+const astroEntryPath = astroEntryCandidates.find((p) => existsSync(p)) ?? null;
+const astroClientDir = astroEntryPath
+  ? path.resolve(path.dirname(astroEntryPath), '..', 'client')
+  : null;
+
+let astroHandler: RequestHandler | null = null;
+if (astroEntryPath) {
+  try {
+    const { handler } = (await import(pathToFileURL(astroEntryPath).href)) as {
+      handler: RequestHandler;
+    };
+    astroHandler = handler;
+    console.log(
+      chalk.green.bold('[Astro] SSR enabled'),
+      chalk.green('— middleware loaded from'),
+      chalk.cyan(path.relative(process.cwd(), astroEntryPath) || astroEntryPath)
+    );
+    if (astroClientDir && existsSync(astroClientDir)) {
+      console.log(
+        chalk.green.bold('[Astro] Static assets'),
+        chalk.green('—'),
+        chalk.cyan(
+          path.relative(process.cwd(), astroClientDir) || astroClientDir
+        )
+      );
+    } else if (astroClientDir) {
+      console.warn(
+        chalk.yellow('[Astro] Expected client bundle missing (no styles?) at'),
+        chalk.yellow(astroClientDir)
+      );
+    }
+  } catch (err) {
+    console.warn(
+      chalk.yellow.bold('[Astro] SSR disabled'),
+      chalk.yellow('— failed to import handler:'),
+      err
+    );
+  }
+} else {
+  console.warn(
+    chalk.yellow.bold('[Astro] SSR disabled'),
+    chalk.yellow('— no build at astro/dist/server/entry.mjs (run'),
+    chalk.cyan('npm run build:astro'),
+    chalk.yellow('). Checked:')
+  );
+  for (const p of astroEntryCandidates) {
+    console.warn(chalk.gray('   ·'), p);
+  }
+  console.warn(
+    chalk.gray(
+      'Use the API port (e.g. http://localhost:9901/) for SSR pages — Vite on :5173 always serves the React SPA.'
+    )
+  );
+}
+
+const app = express();
+
+app.set('trust proxy', 1);
+app.use(securityMiddleware);
+app.use('/charts/chartfox/linked', (_req, res, next) => {
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  next();
+});
+
+app.use('/api/auth/platform-identity', platformIdentityCors);
+
+app.use(
+  cors({
+    origin: allowedOrigins(),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Api-Key',
+      'X-Requested-With',
+      'X-External-ACARS-Token',
+      'Accept',
+      'Origin',
+      'Access-Control-Allow-Credentials',
+    ],
+  })
+);
+
+const developerApiCorsOrigins = (process.env.DEVELOPER_API_CORS_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (developerApiCorsOrigins.length > 0) {
+  app.use(
+    '/api/ext',
+    cors({
+      origin: developerApiCorsOrigins,
+      credentials: false,
+      methods: ['GET', 'HEAD', 'OPTIONS'],
+      allowedHeaders: ['Authorization', 'X-Api-Key', 'Content-Type', 'Accept'],
+    })
+  );
+}
+app.use(cookieParser());
+app.use(express.json());
+
+app.use(apiLogger());
+
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', environment: process.env.NODE_ENV });
+});
+
+app.use('/api', apiRoutes);
+app.use(sitemapXmlRouter);
+
+function setHashedStaticHeaders(res: Response, filePath: string): void {
+  if (filenameLooksContentHashed(filePath)) {
+    applyImmutableAsset(res);
+  }
+  if (filePath.endsWith('.js')) {
+    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  } else if (filePath.endsWith('.css')) {
+    res.setHeader('Content-Type', 'text/css; charset=utf-8');
+  }
+}
+
+app.use(
+  express.static(path.join(__dirname, '../public'), {
+    setHeaders: setHashedStaticHeaders,
+  })
+);
+app.use(
+  express.static(path.join(__dirname, '..', '..', 'dist'), {
+    index: false,
+    setHeaders: setHashedStaticHeaders,
+  })
+);
+
+if (astroClientDir && existsSync(astroClientDir)) {
+  app.use(
+    express.static(astroClientDir, {
+      setHeaders: setHashedStaticHeaders,
+    })
+  );
+}
+
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (!req.path.startsWith('/_astro/') && !req.path.startsWith('/assets/'))
+    return next();
+  res
+    .status(404)
+    .setHeader('Cache-Control', 'no-store')
+    .type('text/plain')
+    .send(
+      'Client chunk not found. Try a hard refresh (Ctrl+Shift+R) or clear site data for this host — your page may reference an old deploy.'
+    );
+});
+
+function injectCspNonceIntoScripts(html: string, nonce: string): string {
+  return html.replace(
+    /<script(?![^>]*\bnonce=)([^>]*)>/g,
+    (_match, attrs: string) => `<script nonce="${nonce}"${attrs}>`
+  );
+}
+
+if (astroHandler) {
+  app.use((req, res, next) => {
+    if (req.query['tutorial'] === 'true') return next();
+
+    const nonce = res.locals.cspNonce as string;
+    const chunks: Buffer[] = [];
+
+    const originalSetHeader = res.setHeader.bind(res);
+    res.setHeader = ((name: string, value: never) => {
+      if (typeof name === 'string' && name.toLowerCase() === 'content-length') {
+        return res;
+      }
+      return originalSetHeader(name, value);
+    }) as typeof res.setHeader;
+
+    const toChunkBuffer = (chunk: unknown): Buffer => {
+      if (Buffer.isBuffer(chunk)) return chunk;
+      if (chunk instanceof Uint8Array) return Buffer.from(chunk);
+      return Buffer.from(String(chunk), 'utf8');
+    };
+
+    res.write = ((chunk: unknown, ...rest: unknown[]) => {
+      chunks.push(toChunkBuffer(chunk));
+      const callback = rest.find((arg) => typeof arg === 'function') as
+        | (() => void)
+        | undefined;
+      callback?.();
+      return true;
+    }) as typeof res.write;
+
+    const originalEnd = res.end.bind(res);
+    res.end = ((chunk?: unknown) => {
+      if (chunk !== undefined && typeof chunk !== 'function') {
+        chunks.push(toChunkBuffer(chunk));
+      }
+      const body = Buffer.concat(chunks).toString('utf8');
+      const finalBody = body ? injectCspNonceIntoScripts(body, nonce) : body;
+      return originalEnd(finalBody, 'utf8');
+    }) as typeof res.end;
+
+    (
+      astroHandler as unknown as RequestHandler & {
+        (req: unknown, res: unknown, next: unknown, locals: unknown): void;
+      }
+    )(req, res, next, { cspNonce: nonce });
+  });
+}
+
+app.get('/{*any}', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '..', '..', 'dist', 'index.html'), {
+    etag: false,
+    lastModified: false,
+  });
+});
+
+setupExpressErrorHandler(posthogClient, app);
+app.use(httpErrorHandler);
+
+const server = http.createServer(app);
+server.setMaxListeners(25);
+
+// Redis pub/sub adapter to join sessions locally that are connected to different server instances e.g. production
+const pubClient = new Redis(process.env.REDIS_URL!);
+const subClient = pubClient.duplicate();
+// Every namespace's adapter adds its own listeners to these shared clients.
+pubClient.setMaxListeners(32);
+subClient.setMaxListeners(32);
+
+const sessionUsersIO = setupSessionUsersWebsocket(server);
+sessionUsersIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'session-users',
+  'Session Users',
+  '/sockets/session-users',
+  sessionUsersIO
+);
+
+const chatIO = setupChatWebsocket(server, sessionUsersIO);
+chatIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace('chat', 'Session Chat', '/sockets/chat', chatIO);
+
+const globalChatIO = setupGlobalChatWebsocket(server);
+globalChatIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'global-chat',
+  'Global Chat',
+  '/sockets/global-chat',
+  globalChatIO
+);
+
+const flightsIO = setupFlightsWebsocket(server);
+flightsIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'flights',
+  'Flights',
+  '/sockets/flights',
+  flightsIO
+);
+
+const overviewIO = setupOverviewWebsocket(server, sessionUsersIO);
+overviewIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'overview',
+  'Overview',
+  '/sockets/overview',
+  overviewIO
+);
+
+const arrivalsIO = setupArrivalsWebsocket(server);
+arrivalsIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'arrivals',
+  'Arrivals',
+  '/sockets/arrivals',
+  arrivalsIO
+);
+
+const sectorControllerIO = setupSectorControllerWebsocket(server);
+sectorControllerIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'sector-controller',
+  'Sector Controller',
+  '/sockets/sector-controller',
+  sectorControllerIO
+);
+
+const voiceChatIO = setupVoiceChatWebsocket(server);
+voiceChatIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'voice-chat',
+  'Voice Chat',
+  '/sockets/voice-chat',
+  voiceChatIO
+);
+
+const pilotChatIO = setupPilotChatWebsocket(server);
+pilotChatIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'pilot-chat',
+  'Pilot Chat',
+  '/sockets/pilot-chat',
+  pilotChatIO
+);
+
+const notificationsIO = setupNotificationsWebsocket(server);
+notificationsIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'notifications',
+  'Notifications',
+  '/sockets/notifications',
+  notificationsIO
+);
+
+const extNetworkFlightsIO = setupExtNetworkFlightsWebsocket(server);
+extNetworkFlightsIO.adapter(createAdapter(pubClient, subClient));
+registerAdminSocketNamespace(
+  'ext-network-flights',
+  'Developer API: Network Flights',
+  '/sockets/ext/network-flights',
+  extNetworkFlightsIO
+);
+
+startStatsFlushing();
+startFlightLogsCleanup();
+startDatabaseMetricsCapture();
+updateLeaderboard();
+setInterval(updateLeaderboard, 12 * 60 * 60 * 1000);
+setInterval(
+  () => {
+    cleanupOldApiLogs(1);
+    void cleanupOldWebsocketSnapshots(1);
+  },
+  60 * 60 * 1000
+);
+
+setInterval(
+  () => {
+    void cleanupOldDeveloperUsage(
+      Number(process.env.DEVELOPER_API_USAGE_RETENTION_DAYS) > 0
+        ? Number(process.env.DEVELOPER_API_USAGE_RETENTION_DAYS)
+        : 90
+    );
+  },
+  24 * 60 * 60 * 1000
+);
+
+server.listen(PORT, () => {
+  startFormsPoller();
+  console.log(chalk.green(`Server running on http://localhost:${PORT}`));
+  void import('./realtime/activeSessions.js')
+    .then((m) => m.rebuildActiveNetworkSetsFromRedis())
+    .catch((err) => {
+      console.error('[activeSessions] startup rebuild failed:', err);
+    });
+});

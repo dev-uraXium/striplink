@@ -1,0 +1,154 @@
+---
+import '../styles/global.css';
+import {
+  SPA_DEFAULT_KEYWORDS,
+  SPA_SITE_URL,
+} from '../lib/spaSeo';
+
+interface Props {
+  title: string;
+  description: string;
+  canonicalUrl?: string;
+  ogImage?: string;
+  ogImageType?: string;
+  ogType?: 'website' | 'profile' | 'article';
+  structuredData?: object | object[];
+  noindex?: boolean;
+  keywords?: string;
+  robots?: string;
+  ogProfileUsername?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  twitterTitle?: string;
+  twitterDescription?: string;
+  twitterCard?: 'summary' | 'summary_large_image';
+  ogImageWidth?: number;
+  ogImageHeight?: number;
+  author?: string;
+}
+
+const {
+  title,
+  description,
+  canonicalUrl,
+  ogImage = `${SPA_SITE_URL}/assets/images/hero.webp`,
+  ogImageType,
+  ogType = 'website',
+  structuredData,
+  noindex = false,
+  keywords,
+  robots,
+  ogProfileUsername,
+  ogTitle,
+  ogDescription,
+  twitterTitle,
+  twitterDescription,
+  twitterCard = 'summary_large_image',
+  ogImageWidth,
+  ogImageHeight,
+  author = 'Cephie Studios',
+} = Astro.props;
+
+const canonical = canonicalUrl ?? `${SPA_SITE_URL}${Astro.url.pathname}`;
+
+const structuredBlocks =
+  structuredData === undefined
+    ? []
+    : Array.isArray(structuredData)
+      ? structuredData
+      : [structuredData];
+
+const robotsContent = noindex
+  ? 'noindex, nofollow'
+  : (robots ?? 'index, follow');
+
+const keywordsContent = keywords ?? SPA_DEFAULT_KEYWORDS;
+
+const ogTitleEffective = ogTitle ?? title;
+const ogDescEffective = ogDescription ?? description;
+const twitterTitleEffective = twitterTitle ?? ogTitleEffective;
+const twitterDescEffective = twitterDescription ?? ogDescEffective;
+---
+
+<!doctype html>
+<html lang="en" data-pf-renderer="astro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
+    <link
+      rel="sitemap"
+      type="application/xml"
+      title="Sitemap"
+      href="/sitemap.xml"
+    />
+
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="StripLink" />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="keywords" content={keywordsContent} />
+    <meta name="robots" content={robotsContent} />
+    <meta name="googlebot" content={robotsContent} />
+    <meta name="author" content={author} />
+
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={ogTitleEffective} />
+    <meta property="og:description" content={ogDescEffective} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:secure_url" content={ogImage} />
+    {ogImageType && <meta property="og:image:type" content={ogImageType} />}
+    {
+      ogImageWidth != null && ogImageHeight != null && (
+        <>
+          <meta property="og:image:width" content={String(ogImageWidth)} />
+          <meta property="og:image:height" content={String(ogImageHeight)} />
+        </>
+      )
+    }
+    <meta property="og:site_name" content="StripLink" />
+    <meta property="og:locale" content="en_US" />
+    {
+      ogType === 'profile' && ogProfileUsername && (
+        <meta property="og:profile:username" content={ogProfileUsername} />
+      )
+    }
+
+    <meta name="twitter:card" content={twitterCard} />
+    <meta name="twitter:title" content={twitterTitleEffective} />
+    <meta name="twitter:description" content={twitterDescEffective} />
+    <meta name="twitter:image" content={ogImage} />
+
+    {
+      structuredBlocks.map((block) => (
+        <script
+          type="application/ld+json"
+          nonce={Astro.locals.cspNonce}
+          set:html={JSON.stringify(block)}
+        />
+      ))
+    }
+
+    <link rel="preconnect" href="https://cdn.discordapp.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+  </head>
+  <body class="bg-black text-white antialiased">
+    <slot />
+    <script nonce={Astro.locals.cspNonce} is:inline>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>

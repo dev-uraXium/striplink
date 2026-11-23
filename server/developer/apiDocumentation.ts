@@ -1,0 +1,251 @@
+import { DEVELOPER_SCOPE_CATALOG } from './scopeRegistry.js';
+import {
+  DEVELOPER_EXT_ROUTES,
+  pathTemplateForRoute,
+  SELF_INFO_SCOPE_ID,
+  type DeveloperExtRouteDefinition,
+} from './extRoutes.js';
+
+export interface DeveloperApiDocHeader {
+  name: string;
+  required: boolean;
+  description: string;
+}
+
+export interface DeveloperApiDocEndpoint {
+  scopeId: string;
+  // Stable key for UI (method + path; scopeId can repeat across methods in future).
+  endpointKey: string;
+  title: string;
+  summary: string;
+  method: string;
+  // Path appended to base URL (includes /data/...).
+  pathTemplate: string;
+  fullUrlExample: string;
+  pathParams?: { name: string; description: string; example?: string }[];
+  queryParams?: {
+    name: string;
+    required: boolean;
+    description: string;
+    example?: string;
+  }[];
+  requestBodySummary?: string;
+  requestBodyExampleJson?: string;
+  requestHeaders: DeveloperApiDocHeader[];
+  responseContentType: string;
+  responseSummary: string;
+  exampleCurl: string;
+  availableSince: 1 | 2 | 3;
+}
+
+export interface DeveloperApiDocWebsocketEvent {
+  name: string;
+  direction: 'server-to-client' | 'client-to-server';
+  description: string;
+}
+
+export interface DeveloperApiDocWebsocket {
+  title: string;
+  scopeId: string;
+  path: string;
+  description: string;
+  authentication: string;
+  events: DeveloperApiDocWebsocketEvent[];
+  exampleCode: string;
+}
+
+export interface DeveloperApiPublicSpec {
+  specVersion: number;
+  generatedAt: string;
+  title: string;
+  description: string;
+  baseUrlTemplate: string;
+  legacyBaseUrlTemplate: string;
+  authentication: {
+    description: string;
+    headers: DeveloperApiDocHeader[];
+  };
+  rateLimiting: {
+    description: string;
+    defaultPerMinute: number;
+    envVar: string;
+  };
+  endpoints: DeveloperApiDocEndpoint[];
+  websockets: DeveloperApiDocWebsocket[];
+}
+
+const DEFAULT_BASE = `${(process.env.FRONTEND_URL || 'http://localhost:9901').replace(/\/+$/, '')}/api/ext/v3`;
+
+function catalogTitle(scopeId: string): string {
+  if (scopeId === SELF_INFO_SCOPE_ID) return 'Your API key info';
+  const c = DEVELOPER_SCOPE_CATALOG.find((x) => x.id === scopeId);
+  return c?.label ?? scopeId;
+}
+
+function catalogSummary(scopeId: string): string {
+  if (scopeId === SELF_INFO_SCOPE_ID) {
+    return 'Not a grantable scope — every valid key can always call this.';
+  }
+  const c = DEVELOPER_SCOPE_CATALOG.find((x) => x.id === scopeId);
+  return c?.description ?? '';
+}
+
+function escapeShellSingleQuotes(s: string): string {
+  return `'${s.replace(/'/g, `'"'"'`)}'`;
+}
+
+function buildExampleCurl(
+  method: string,
+  pathWithQuery: string,
+  bodyJson?: string
+): string {
+  const headers =
+    '-H "Authorization: Bearer YOUR_PFC_LIVE_KEY" -H "Accept: application/json"';
+  const m = method.toUpperCase();
+  if (m === 'GET' || m === 'HEAD') {
+    return `curl -sS ${headers} "${DEFAULT_BASE}${pathWithQuery}"`;
+  }
+  if (bodyJson) {
+    return `curl -sS -X ${m} ${headers} -H "Content-Type: application/json" -d ${escapeShellSingleQuotes(bodyJson)} "${DEFAULT_BASE}${pathWithQuery}"`;
+  }
+  return `curl -sS -X ${m} ${headers} "${DEFAULT_BASE}${pathWithQuery}"`;
+}
+
+function endpointFromRoute(
+  r: DeveloperExtRouteDefinition
+): DeveloperApiDocEndpoint {
+  const pathTemplate = pathTemplateForRoute(r);
+  let examplePath = pathTemplate;
+  if (r.pathParams?.length) {
+    for (const p of r.pathParams) {
+      examplePath = examplePath.replace(
+        `{${p.name}}`,
+        p.example ?? `{${p.name}}`
+      );
+    }
+  }
+  let query = '';
+  if (r.queryParams?.length) {
+    const parts = r.queryParams
+      .filter((q) => q.required && q.example)
+      .map(
+        (q) => `${encodeURIComponent(q.name)}=${encodeURIComponent(q.example!)}`
+      );
+    if (parts.length) query = `?${parts.join('&')}`;
+  }
+  const pathWithQuery = `${examplePath}${query}`;
+
+  const requestHeaders: DeveloperApiDocHeader[] = [
+    {
+      name: 'Authorization',
+      required: false,
+      description: 'Bearer token: `Authorization: Bearer pfc_live_...`',
+    },
+    {
+      name: 'X-Api-Key',
+      required: false,
+      description:
+        'Alternative to Authorization: send the raw `pfc_live_...` secret in this header.',
+    },
+    {
+      name: 'Accept',
+      required: false,
+      description: 'Optional; responses are JSON (`application/json`).',
+    },
+  ];
+
+  return {
+    scopeId: r.scopeId,
+    endpointKey: `${r.method} ${pathTemplate}`,
+    title: catalogTitle(r.scopeId),
+    summary: catalogSummary(r.scopeId),
+    method: r.method,
+    pathTemplate,
+    fullUrlExample: `${DEFAULT_BASE}${pathWithQuery}`,
+    pathParams: r.pathParams,
+    queryParams: r.queryParams,
+    requestBodySummary: r.requestBodySummary,
+    requestBodyExampleJson: r.requestBodyExampleJson,
+    requestHeaders,
+    responseContentType: 'application/json',
+    responseSummary: r.responseSummary,
+    exampleCurl: buildExampleCurl(
+      r.method,
+      pathWithQuery,
+      r.requestBodyExampleJson
+    ),
+    availableSince: r.minVersion ?? 1,
+  };
+}
+
+export function buildDeveloperApiPublicSpec(): DeveloperApiPublicSpec {
+  const defaultPerMinute = Number(
+    process.env.DEVELOPER_API_RATE_LIMIT_PER_MINUTE
+  );
+  const perMin =
+    Number.isFinite(defaultPerMinute) && defaultPerMinute > 0
+      ? defaultPerMinute
+      : 120;
+
+  return {
+    specVersion: 3,
+    generatedAt: new Date().toISOString(),
+    title: 'StripLink Developer API',
+    description:
+      "HTTP JSON API at /api/ext/v3. Static /data/... routes mirror the public data API. /sessions and /sessions/{sessionId}/flights provide session and flight access when your key's scopes allow it. Join codes, client IP addresses, and ACARS tokens are never included in responses. v3 flight updates reject the entire request with HTTP 400 when any field is unsupported or invalid, so a successful response means every submitted field was applied. Flight updates (PUT) and session/flight deletes (DELETE) are only allowed on sessions created with the same API key. Each key can only call the endpoints covered by its granted scopes. /api/ext/v2 and /api/ext/v1 remain available with their existing behavior; those versions silently ignore unrecognized flight update fields.",
+    baseUrlTemplate: '/api/ext/v3',
+    legacyBaseUrlTemplate: '/api/ext/v2',
+    authentication: {
+      description:
+        'Use a developer API key issued from the Developers portal after your application is approved. Keys start with `pfc_live_` (legacy `pf_live_` keys still work until rotated). Either header style works; do not send cookies for machine clients.',
+      headers: [
+        {
+          name: 'Authorization',
+          required: false,
+          description: 'Bearer pfc_live_…',
+        },
+        {
+          name: 'X-Api-Key',
+          required: false,
+          description: 'Raw secret string (same value as after Bearer).',
+        },
+      ],
+    },
+    rateLimiting: {
+      description:
+        'Per API key, per minute sliding window. HTTP 429 with Retry-After when exceeded.',
+      defaultPerMinute: perMin,
+      envVar: 'DEVELOPER_API_RATE_LIMIT_PER_MINUTE',
+    },
+    endpoints: DEVELOPER_EXT_ROUTES.filter((r) => !r.hidden).map(
+      endpointFromRoute
+    ),
+    websockets: [
+      {
+        title: 'Network Flights (live push)',
+        scopeId: 'sessions.network_overview',
+        path: '/sockets/ext/network-flights',
+        description:
+          'Server-to-server push channel for GET /sessions/network/flights, use this instead of polling that endpoint. Read-only: there is no client-to-server event on this socket. Requires the same sessions.network_overview scope as the REST endpoint. Not for browser clients, listeners with Origin headers will be rejected. Max 5 concurrent connections per API key.',
+        authentication:
+          'Pass your key as the socket.io `auth.token` option (or a `token` query param as a fallback) — the same pfc_live_... secret used for REST calls. Connections with a missing, invalid, or a under-scoped key are rejected before any data is sent. Connections with Origin headers are rejected before any data is sent.',
+        events: [
+          {
+            name: 'flights',
+            direction: 'server-to-client',
+            description:
+              'Same JSON array shape as GET /sessions/network/flights. Sent once immediately on connect, then again every ~5 seconds while connected.',
+          },
+          {
+            name: 'connect_error',
+            direction: 'server-to-client',
+            description:
+              'Fired instead of a successful connection if auth fails; err.message explains why (invalid/missing key, missing scope, or too many concurrent connections for this key).',
+          },
+        ],
+        exampleCode:
+          "import { io } from 'socket.io-client';\n\nconst socket = io('https://your-striplink-host', {\n  path: '/sockets/ext/network-flights',\n  auth: { token: 'pfc_live_...' },\n  transports: ['websocket'],\n});\n\nsocket.on('flights', (flights) => {\n  // same shape as GET /sessions/network/flights\n});\nsocket.on('connect_error', (err) => console.error(err.message));",
+      },
+    ],
+  };
+}

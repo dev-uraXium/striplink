@@ -1,0 +1,372 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { fetchApi } from '../../lib/api';
+import { getSiteOrigin } from '../../lib/siteOrigin';
+import { SPA_SITE_URL } from '../../lib/spaSeo';
+import ProfileContent from '@app/islands/ProfileContent';
+
+interface Role {
+  id: number;
+  name: string;
+  description: string | null;
+  color: string;
+  icon: string;
+  priority: number;
+}
+
+interface FeaturedFlight {
+  id: string;
+  callsign?: string;
+  departure?: string;
+  arrival?: string;
+  aircraft?: string;
+  status?: string;
+  snap_images: Array<{ cephie_id: string; url: string }>;
+  created_at?: string;
+}
+
+interface PilotProfile {
+  user: {
+    id: string;
+    username: string;
+    discriminator: string;
+    avatar: string | null;
+    roblox_username: string | null;
+    vatsim_cid: string | null;
+    vatsim_rating_short: string | null;
+    vatsim_rating_long: string | null;
+    member_since: string;
+    is_admin: boolean;
+    roles: Role[];
+    bio: string;
+    statistics: Record<string, unknown>;
+    rating: { averageRating: number; ratingCount: number } | null;
+    background_image?: {
+      selectedImage?: string;
+      useCustomBackground?: boolean;
+    } | null;
+  };
+  privacySettings: {
+    displayControllerStatsOnProfile: boolean;
+    displayPilotStatsOnProfile: boolean;
+    displayControllerRatingOnProfile: boolean;
+    displayLinkedAccountsOnProfile: boolean;
+    displayBackgroundOnProfile: boolean;
+  };
+  featuredFlights?: FeaturedFlight[];
+}
+
+const { username } = Astro.params;
+
+if (!username) {
+  return Astro.redirect('/');
+}
+
+const profile = await fetchApi<PilotProfile>(
+  `/api/pilot/${encodeURIComponent(username)}`
+);
+
+if (!profile) {
+  return new Response(null, { status: 404 });
+}
+
+const ranks =
+  (await fetchApi<Record<string, number | string | null>>(
+    `/api/data/ranks/${encodeURIComponent(profile.user.id)}`
+  )) ?? {};
+
+const { user, privacySettings, featuredFlights } = profile;
+
+const siteOrigin = getSiteOrigin(Astro.request);
+
+function getDiscordAvatar(
+  userId: string,
+  avatarHash: string | null,
+  size: number,
+  assetOrigin: string
+): string {
+  if (!avatarHash) return `${assetOrigin}/assets/app/default/avatar.webp`;
+  return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.png?size=${size}`;
+}
+
+function formatMemberSince(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+const memberSince = formatMemberSince(user.member_since);
+const profileUrl = `${siteOrigin}/user/${user.username}`;
+const avatarUrl = getDiscordAvatar(user.id, user.avatar, 256, siteOrigin);
+const rolesText =
+  user.roles?.length > 0
+    ? user.roles
+        .map((r) => r.name)
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
+function truncateMeta(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getStat(stats: Record<string, unknown>, key: string): number | null {
+  const val = stats?.[key];
+  if (typeof val === 'number') return val;
+  if (typeof val === 'object' && val !== null) {
+    const nested = (val as Record<string, unknown>)['total'];
+    if (typeof nested === 'number') return nested;
+  }
+  return null;
+}
+
+function fmtTime(rawMins: number): string {
+  const mins = Math.floor(rawMins);
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
+  }
+  return `${mins}m`;
+}
+
+const topRole = user.roles?.[0]?.name ?? null;
+const plainBio = user.bio ? stripHtml(user.bio) : '';
+const bioSnippet = plainBio ? truncateMeta(plainBio, 120) : null;
+
+const pageTitle = topRole
+  ? `${user.username} — ${topRole} · StripLink`
+  : `${user.username} · StripLink`;
+const ogTitle = pageTitle;
+
+const descParts: string[] = [];
+
+if (bioSnippet) {
+  descParts.push(`"${bioSnippet}"`);
+}
+
+const roleLine = topRole
+  ? user.is_admin
+    ? `${topRole} · StripLink Team`
+    : topRole
+  : user.is_admin
+  ? 'StripLink Team'
+  : null;
+if (roleLine) descParts.push(roleLine);
+
+if (privacySettings.displayPilotStatsOnProfile) {
+  const sessions = getStat(user.statistics, 'total_sessions_created');
+  const flights = getStat(user.statistics, 'total_flights_submitted');
+  const ctrlMins = getStat(user.statistics, 'total_time_controlling_minutes');
+  const statBits: string[] = [];
+  if (sessions != null) statBits.push(`${sessions.toLocaleString('en-US')} sessions`);
+  if (flights != null) statBits.push(`${flights.toLocaleString('en-US')} flights`);
+  if (ctrlMins != null) statBits.push(`${fmtTime(ctrlMins)} ATC`);
+  if (statBits.length > 0) descParts.push(statBits.join(' · '));
+}
+
+descParts.push(`Member since ${memberSince}`);
+
+if (
+  privacySettings.displayLinkedAccountsOnProfile &&
+  user.vatsim_cid &&
+  user.vatsim_rating_short
+) {
+  descParts.push(`VATSIM ${user.vatsim_rating_short}`);
+}
+
+const pageDescription = truncateMeta(descParts.join(' — '), 200);
+
+const ogImagePng = `${siteOrigin}/api/og/profile/${encodeURIComponent(user.username)}`;
+
+const keywordParts = [
+  'StripLink',
+  user.username,
+  'StripLink profile',
+  `${user.username} StripLink`,
+  'flight strips',
+  'ATC',
+  'VATSIM',
+  'pilot profile',
+  'air traffic control',
+];
+if (rolesText) keywordParts.push(...user.roles.map((r) => r.name));
+if (user.roblox_username && privacySettings.displayLinkedAccountsOnProfile) {
+  keywordParts.push('Roblox', user.roblox_username);
+}
+if (user.vatsim_cid && privacySettings.displayLinkedAccountsOnProfile) {
+  keywordParts.push('VATSIM', `VATSIM ${user.vatsim_cid}`);
+}
+const keywords = [...new Set(keywordParts)].join(', ');
+
+const sameAs: string[] = [profileUrl];
+if (privacySettings.displayLinkedAccountsOnProfile && user.roblox_username) {
+  sameAs.push(
+    `https://www.roblox.com/search/users?keyword=${encodeURIComponent(user.roblox_username)}`
+  );
+}
+if (privacySettings.displayLinkedAccountsOnProfile && user.vatsim_cid) {
+  sameAs.push(`https://stats.vatsim.net/stats/${user.vatsim_cid}`);
+}
+
+const knowsAbout: string[] = [...(user.roles?.map((r) => r.name) ?? [])];
+if (user.vatsim_rating_long) knowsAbout.push(user.vatsim_rating_long);
+
+const personDescription = pageDescription;
+
+const personNode: Record<string, unknown> = {
+  '@type': 'Person',
+  '@id': `${profileUrl}#person`,
+  name: user.username,
+  alternateName: [`@${user.username}`, `${user.username} on StripLink`],
+  url: profileUrl,
+  image: {
+    '@type': 'ImageObject',
+    url: avatarUrl,
+    caption: `${user.username} — StripLink Avatar`,
+  },
+  description: truncateMeta(personDescription, 4000),
+  identifier: profileUrl,
+  mainEntityOfPage: { '@id': `${profileUrl}#webpage` },
+  memberOf: {
+    '@type': 'Organization',
+    '@id': `${SPA_SITE_URL}/#organization`,
+    name: 'StripLink',
+    url: SPA_SITE_URL,
+    description:
+      'Real-time flight strip platform for air traffic control simulation.',
+  },
+  ...(knowsAbout.length > 0 && { knowsAbout }),
+  ...(sameAs.length > 1 && { sameAs: [...new Set(sameAs)] }),
+  ...(user.is_admin && {
+    jobTitle: 'StripLink Developer',
+  }),
+  ...(!user.is_admin && {
+    jobTitle: 'StripLink Member',
+  }),
+};
+
+if (
+  privacySettings.displayControllerRatingOnProfile &&
+  user.rating &&
+  user.rating.ratingCount > 0
+) {
+  personNode.aggregateRating = {
+    '@type': 'AggregateRating',
+    ratingValue: user.rating.averageRating,
+    ratingCount: user.rating.ratingCount,
+    bestRating: 5,
+    worstRating: 1,
+  };
+}
+
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'WebSite',
+      '@id': `${SPA_SITE_URL}/#website`,
+      name: 'StripLink',
+      url: SPA_SITE_URL,
+      publisher: { '@id': `${SPA_SITE_URL}/#organization` },
+    },
+    {
+      '@type': 'Organization',
+      '@id': `${SPA_SITE_URL}/#organization`,
+      name: 'StripLink',
+      url: SPA_SITE_URL,
+      logo: {
+        '@type': 'ImageObject',
+        url: `${SPA_SITE_URL}/favicon.svg`,
+      },
+    },
+    {
+      '@type': 'WebPage',
+      '@id': `${profileUrl}#webpage`,
+      url: profileUrl,
+      name: pageTitle,
+      description: pageDescription,
+      isPartOf: { '@id': `${SPA_SITE_URL}/#website` },
+      about: { '@id': `${profileUrl}#person` },
+      primaryImageOfPage: { '@type': 'ImageObject', url: ogImagePng },
+      inLanguage: 'en',
+      ...(rolesText && { keywords: rolesText }),
+    },
+    {
+      '@type': 'BreadcrumbList',
+      itemListElement: [
+        {
+          '@type': 'ListItem',
+          position: 1,
+          name: 'StripLink',
+          item: siteOrigin,
+        },
+        {
+          '@type': 'ListItem',
+          position: 2,
+          name: user.username,
+          item: profileUrl,
+        },
+      ],
+    },
+    personNode,
+    ...(featuredFlights?.length
+      ? [
+          {
+            '@type': 'ItemList',
+            name: `Featured flights — ${user.username} on StripLink`,
+            description: `Flight strips and highlights on ${user.username}'s public StripLink pilot profile.`,
+            numberOfItems: featuredFlights.length,
+            itemListElement: featuredFlights.map((f, i) => ({
+              '@type': 'ListItem',
+              position: i + 1,
+              name: f.callsign ?? `Flight ${String(f.id).slice(0, 8)}`,
+              url: `${SPA_SITE_URL}/flight/${f.id}`,
+              ...(f.departure &&
+                f.arrival && {
+                  description: `${f.departure} → ${f.arrival}${f.aircraft ? ` · ${f.aircraft}` : ''}`,
+                }),
+            })),
+          },
+        ]
+      : []),
+  ],
+};
+
+---
+
+<BaseLayout
+  title={pageTitle}
+  description={pageDescription}
+  ogTitle={ogTitle}
+  twitterTitle={ogTitle}
+  ogType="profile"
+  ogImage={ogImagePng}
+  ogImageType="image/png"
+  ogImageWidth={1200}
+  ogImageHeight={630}
+  twitterCard="summary_large_image"
+  ogProfileUsername={user.username}
+  canonicalUrl={profileUrl}
+  structuredData={structuredData}
+  keywords={keywords}
+>
+  <ProfileContent
+    username={user.username}
+    pathname={Astro.url.pathname + Astro.url.search}
+    initialProfile={profile}
+    initialRanks={ranks}
+    client:load
+  />
+</BaseLayout>

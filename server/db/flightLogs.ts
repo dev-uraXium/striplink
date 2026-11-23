@@ -1,0 +1,297 @@
+import { mainDb } from './connection.js';
+import { recordTableDeletes } from './databaseMetrics.js';
+import { encrypt, decrypt } from '../utils/encryption.js';
+import { sql } from 'kysely';
+
+const FLIGHT_LOG_RETENTION_DAYS = 365;
+
+export interface FlightLogData {
+  userId: string;
+  username: string;
+  sessionId: string;
+  action: 'add' | 'update' | 'delete';
+  flightId: string;
+  oldData?: object | null;
+  newData?: object | null;
+  ipAddress?: string | null;
+}
+
+export async function getFlightLogsCount(): Promise<number> {
+  try {
+    const row = await mainDb
+      .selectFrom('flight_logs')
+      .select(({ fn }) => fn.countAll().as('count'))
+      .executeTakeFirst();
+    return Number(row?.count) || 0;
+  } catch (error) {
+    console.error('Error counting flight logs:', error);
+    throw error;
+  }
+}
+
+export async function logFlightAction(logData: FlightLogData) {
+  const {
+    userId,
+    username,
+    sessionId,
+    action,
+    flightId,
+    oldData = null,
+    newData = null,
+    ipAddress = null,
+  } = logData;
+
+  try {
+    const encryptedIP = ipAddress ? JSON.stringify(encrypt(ipAddress)) : null;
+    await mainDb
+      .insertInto('flight_logs')
+      .values({
+        id: sql`DEFAULT`,
+        user_id: userId,
+        username,
+        session_id: sessionId,
+        action,
+        flight_id: flightId,
+        old_data: oldData,
+        new_data: newData,
+        ip_address: encryptedIP,
+        created_at: sql`NOW()`,
+      })
+      .execute();
+  } catch (error) {
+    console.error('Error logging flight action:', error);
+  }
+}
+
+export async function cleanupOldFlightLogs(
+  daysToKeep = FLIGHT_LOG_RETENTION_DAYS
+) {
+  try {
+    const result = await mainDb
+      .deleteFrom('flight_logs')
+      .where(
+        'created_at',
+        '<',
+        new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000)
+      )
+      .executeTakeFirst();
+
+    const deleted = Number(result?.numDeletedRows ?? 0);
+    await recordTableDeletes('flight_logs', deleted);
+    return deleted;
+  } catch (error) {
+    console.error('Error cleaning up flight logs:', error);
+    throw error;
+  }
+}
+
+let cleanupInterval: NodeJS.Timeout | null = null;
+
+export function startFlightLogsCleanup() {
+  const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // Daily
+
+  setTimeout(async () => {
+    try {
+      await cleanupOldFlightLogs(FLIGHT_LOG_RETENTION_DAYS);
+    } catch (error) {
+      console.error('Initial flight logs cleanup failed:', error);
+    }
+  }, 60 * 1000);
+
+  cleanupInterval = setInterval(async () => {
+    try {
+      await cleanupOldFlightLogs(FLIGHT_LOG_RETENTION_DAYS);
+    } catch (error) {
+      console.error('Scheduled flight logs cleanup failed:', error);
+    }
+  }, CLEANUP_INTERVAL);
+}
+
+export function stopFlightLogsCleanup() {
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+}
+
+export interface FlightLogFilters {
+  general?: string;
+  user?: string;
+  action?: 'add' | 'update' | 'delete';
+  session?: string;
+  flightId?: string;
+  date?: string;
+  text?: string;
+}
+
+export async function getFlightLogs(
+  page = 1,
+  limit = 50,
+  filters: FlightLogFilters = {}
+) {
+  try {
+    let base = mainDb.selectFrom('flight_logs');
+
+    if (filters.general) {
+      const searchPattern = `%${filters.general}%`;
+      base = base.where((eb) =>
+        eb.or([
+          eb('username', 'ilike', searchPattern),
+          eb('session_id', 'ilike', searchPattern),
+          eb('flight_id', 'ilike', searchPattern),
+          eb('user_id', 'ilike', searchPattern),
+          eb(sql`old_data::text`, 'ilike', searchPattern),
+          eb(sql`new_data::text`, 'ilike', searchPattern),
+        ])
+      );
+    }
+
+    if (filters.user) {
+      base = base.where('username', 'ilike', `%${filters.user}%`);
+    }
+    if (filters.action) {
+      base = base.where('action', '=', filters.action);
+    }
+    if (filters.session) {
+      base = base.where('session_id', '=', filters.session);
+    }
+    if (filters.flightId) {
+      base = base.where('flight_id', '=', filters.flightId);
+    }
+    if (filters.date) {
+      const startOfDay = new Date(filters.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(filters.date);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      base = base.where('created_at', '>=', startOfDay);
+      base = base.where('created_at', '<=', endOfDay);
+    }
+    if (filters.text) {
+      const searchPattern = `%${filters.text}%`;
+      base = base.where((eb) =>
+        eb.or([
+          eb(sql`old_data::text`, 'ilike', searchPattern),
+          eb(sql`new_data::text`, 'ilike', searchPattern),
+        ])
+      );
+    }
+
+    const logs = await base
+      .selectAll()
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .offset((page - 1) * limit)
+      .execute();
+
+    const total = await base
+      .select((eb) => eb.fn.count('id').as('count'))
+      .executeTakeFirst();
+
+    return {
+      logs: logs.map((log) => ({
+        ...log,
+        ip_address: log.ip_address
+          ? decrypt(
+              typeof log.ip_address === 'string'
+                ? JSON.parse(log.ip_address)
+                : log.ip_address
+            )
+          : null,
+      })),
+      pagination: {
+        page,
+        limit,
+        total: Number(total?.count || 0),
+        pages: Math.ceil(Number(total?.count || 0) / limit),
+      },
+    };
+  } catch (error) {
+    console.error('Error fetching flight logs:', error);
+    throw error;
+  }
+}
+
+export async function listDeveloperFlightLogsMetadata(
+  ownerUserId: string,
+  opts: { sessionId?: string; page?: number; limit?: number }
+) {
+  const page = Math.max(1, opts.page ?? 1);
+  const limit = Math.min(100, Math.max(1, opts.limit ?? 50));
+  const offset = (page - 1) * limit;
+
+  let base = mainDb
+    .selectFrom('flight_logs')
+    .innerJoin('sessions', 'sessions.session_id', 'flight_logs.session_id')
+    .where('sessions.created_by', '=', ownerUserId);
+
+  if (opts.sessionId) {
+    base = base.where('flight_logs.session_id', '=', opts.sessionId);
+  }
+
+  const rows = await base
+    .select([
+      'flight_logs.id',
+      'flight_logs.session_id',
+      'flight_logs.flight_id',
+      'flight_logs.action',
+      'flight_logs.created_at',
+    ])
+    .orderBy('flight_logs.created_at', 'desc')
+    .limit(limit)
+    .offset(offset)
+    .execute();
+
+  let countQ = mainDb
+    .selectFrom('flight_logs')
+    .innerJoin('sessions', 'sessions.session_id', 'flight_logs.session_id')
+    .where('sessions.created_by', '=', ownerUserId);
+  if (opts.sessionId) {
+    countQ = countQ.where('flight_logs.session_id', '=', opts.sessionId);
+  }
+  const totalRow = await countQ
+    .select((eb) => eb.fn.count<number>('flight_logs.id').as('count'))
+    .executeTakeFirst();
+
+  return {
+    logs: rows.map((r) => ({
+      id: String(r.id),
+      sessionId: r.session_id,
+      flightId: r.flight_id,
+      action: r.action,
+      createdAt: r.created_at,
+    })),
+    pagination: {
+      page,
+      limit,
+      total: Number(totalRow?.count ?? 0),
+      pages: Math.ceil(Number(totalRow?.count ?? 0) / limit) || 1,
+    },
+  };
+}
+
+export async function getFlightLogById(logId: string | number) {
+  try {
+    const log = await mainDb
+      .selectFrom('flight_logs')
+      .selectAll()
+      .where('id', '=', Number(logId))
+      .executeTakeFirst();
+
+    if (!log) return null;
+
+    return {
+      ...log,
+      ip_address: log.ip_address
+        ? decrypt(
+            typeof log.ip_address === 'string'
+              ? JSON.parse(log.ip_address)
+              : log.ip_address
+          )
+        : null,
+    };
+  } catch (error) {
+    console.error('Error fetching flight log by ID:', error);
+    throw error;
+  }
+}

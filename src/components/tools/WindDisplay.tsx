@@ -1,0 +1,522 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Wind,
+  AlertTriangle,
+  Loader2,
+  Gauge,
+  RefreshCw,
+  Plane,
+  Clock,
+} from 'lucide-react';
+import { fetchMetar } from '../../utils/fetch/metar';
+import type { MetarData } from '../../types/metar';
+import { cn } from '@/lib/utils';
+
+interface WindDisplayProps {
+  icao: string | null;
+  forceHide?: boolean;
+  size?: 'normal' | 'small';
+  className?: string;
+}
+
+// Airports with no METAR station of their own — nearest reporting station
+// used instead, with a warning shown to the user (see isSpecial below).
+const METAR_SUBSTITUTE_STATIONS: Record<
+  string,
+  { icao: string; distance: string }
+> = {
+  MDCR: { icao: 'MDBH', distance: '65km' },
+  MTCA: { icao: 'MTPP', distance: '166km' },
+  X2BH: { icao: 'EGTE', distance: '72km' }, // ~39nm
+};
+
+function metarMatchesSessionIcao(
+  metar: MetarData | null,
+  sessionIcao: string
+): boolean {
+  if (!metar?.icaoId) return false;
+  const u = sessionIcao.trim().toUpperCase();
+  const id = String(metar.icaoId).toUpperCase();
+  const substitute = METAR_SUBSTITUTE_STATIONS[u];
+  if (substitute) return id === substitute.icao;
+  return id === u;
+}
+
+const WindDisplay: React.FC<WindDisplayProps> = ({
+  icao,
+  forceHide = false,
+  size = 'normal',
+  className,
+}) => {
+  const [metarData, setMetarData] = useState<MetarData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [refreshMiss, setRefreshMiss] = useState(false);
+  const [showAltimeter, setShowAltimeter] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [, forceUpdate] = useState({});
+  const metarRef = React.useRef<MetarData | null>(null);
+  const loadFinishTimeoutRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+
+  React.useEffect(() => {
+    metarRef.current = metarData;
+  }, [metarData]);
+
+  const loadMetarData = React.useCallback(
+    async (options?: { background?: boolean }) => {
+      if (!icao) return;
+
+      const background = options?.background ?? false;
+      const hasMatchingMetar = metarMatchesSessionIcao(metarRef.current, icao);
+      const showBlockingLoader = !background || !hasMatchingMetar;
+
+      const startTime = Date.now();
+      if (showBlockingLoader) {
+        setIsLoading(true);
+      }
+      if (!background) {
+        setError(null);
+      }
+
+      try {
+        let data: MetarData | null = null;
+        const substitute = METAR_SUBSTITUTE_STATIONS[icao.toUpperCase()];
+        data = await fetchMetar(substitute ? substitute.icao : icao);
+
+        if (data) {
+          setMetarData(data);
+          setLastRefreshed(new Date());
+          setError(null);
+          setRefreshMiss(false);
+        } else if (!metarMatchesSessionIcao(metarRef.current, icao)) {
+          setError('No METAR data available');
+        } else {
+          setRefreshMiss(true);
+        }
+      } catch (err) {
+        if (!metarMatchesSessionIcao(metarRef.current, icao)) {
+          setError('Failed to load METAR data');
+        } else {
+          setRefreshMiss(true);
+        }
+        console.error('Error loading METAR data:', err);
+      } finally {
+        const elapsedTime = Date.now() - startTime;
+        const remainingTime = Math.max(0, 500 - elapsedTime); // At least 500ms to avoid a flash of loading
+
+        if (loadFinishTimeoutRef.current) {
+          clearTimeout(loadFinishTimeoutRef.current);
+        }
+        loadFinishTimeoutRef.current = setTimeout(() => {
+          loadFinishTimeoutRef.current = null;
+          setIsLoading(false);
+        }, remainingTime);
+      }
+    },
+    [icao]
+  );
+
+  useEffect(() => {
+    if (!icao || forceHide) {
+      setMetarData(null);
+      setError(null);
+      if (loadFinishTimeoutRef.current) {
+        clearTimeout(loadFinishTimeoutRef.current);
+        loadFinishTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    loadMetarData({ background: false });
+
+    const interval = setInterval(
+      () => {
+        loadMetarData({ background: true });
+      },
+      5 * 60 * 1000
+    );
+
+    return () => {
+      clearInterval(interval);
+      if (loadFinishTimeoutRef.current) {
+        clearTimeout(loadFinishTimeoutRef.current);
+        loadFinishTimeoutRef.current = null;
+      }
+    };
+  }, [icao, forceHide, loadMetarData]);
+
+  useEffect(() => {
+    if (!lastRefreshed) return;
+
+    const updateInterval = setInterval(() => {
+      forceUpdate({});
+    }, 30000);
+
+    return () => clearInterval(updateInterval);
+  }, [lastRefreshed]);
+
+  const handleManualRefresh = () => {
+    loadMetarData({ background: false });
+  };
+
+  const togglePressureFormat = () => {
+    setShowAltimeter(!showAltimeter);
+  };
+
+  const getWindSeverityColor = (windSpeed: number, gust?: number) => {
+    const effectiveWind = gust || windSpeed;
+
+    if (effectiveWind >= 35) {
+      return {
+        icon: 'text-red-500',
+        text: 'text-red-400',
+      };
+    }
+    if (effectiveWind >= 20) {
+      return {
+        icon: 'text-yellow-400',
+        text: 'text-yellow-300',
+      };
+    }
+    if (effectiveWind >= 10) {
+      return {
+        icon: 'text-blue-400',
+        text: 'text-blue-300',
+      };
+    }
+    return {
+      icon: 'text-green-400',
+      text: 'text-green-300',
+    };
+  };
+
+  const formatPressure = (altimeterHpa: number) => {
+    if (!altimeterHpa) {
+      return {
+        value: 'N/A',
+        unit: '',
+        label: '',
+      };
+    }
+
+    if (showAltimeter) {
+      const inHgValue = altimeterHpa / 33.8639;
+      return {
+        value: `A${inHgValue.toFixed(2)}`,
+        unit: '',
+        label: 'Altimeter',
+      };
+    } else {
+      return {
+        value: altimeterHpa.toString(),
+        unit: ' hPa',
+        label: 'QNH',
+      };
+    }
+  };
+
+  const formatRefreshTime = (refreshDate: Date | null) => {
+    if (!refreshDate) return 'Not refreshed';
+
+    const now = new Date();
+    const diffMinutes = Math.floor(
+      (now.getTime() - refreshDate.getTime()) / (1000 * 60)
+    );
+    if (diffMinutes === 0) {
+      return 'Just now';
+    } else if (diffMinutes < 60) {
+      return `${diffMinutes}m ago`;
+    } else if (diffMinutes < 1440) {
+      const hours = Math.floor(diffMinutes / 60);
+      return `${hours}h ago`;
+    } else {
+      return refreshDate.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+  };
+
+  const getFlightCategoryColor = (category: string) => {
+    switch (category) {
+      case 'VFR':
+        return 'text-green-400';
+      case 'MVFR':
+        return 'text-yellow-400';
+      case 'IFR':
+        return 'text-orange-400';
+      case 'LIFR':
+        return 'text-red-400';
+      default:
+        return 'text-gray-400';
+    }
+  };
+
+  const metarSubstitute = icao
+    ? METAR_SUBSTITUTE_STATIONS[icao.toUpperCase()]
+    : undefined;
+  const isSpecial = Boolean(metarSubstitute);
+
+  if (forceHide) {
+    return null;
+  }
+
+  if (!icao) {
+    return (
+      <div
+        className={`flex items-center text-sm text-gray-400 gap-2 px-3 py-2 bg-gray-800 rounded border border-gray-700 ${
+          size === 'small' ? 'text-xs px-2 py-1' : ''
+        }`}
+      >
+        <Plane className={size === 'small' ? 'h-3 w-3' : 'h-4 w-4'} />
+        <span>No airport selected</span>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div
+        className={cn(
+          `flex items-center text-sm text-gray-400 gap-2 px-3 py-4 pl-5 ${
+            size === 'small'
+              ? 'bg-gray-800 border-gray-700'
+              : 'bg-gray-900 border-gray-800'
+          } rounded-3xl border ${size === 'small' ? 'text-xs px-2 py-1' : ''}`,
+          size !== 'small' && className
+        )}
+      >
+        <Loader2
+          className={`animate-spin ${size === 'small' ? 'h-3 w-3' : 'h-4 w-4'}`}
+        />
+        <span>Loading METAR data...</span>
+      </div>
+    );
+  }
+
+  if (!metarData) {
+    return (
+      <div
+        className={cn(
+          `flex items-center justify-between text-sm px-3 py-4 bg-gray-900 rounded-full border border-gray-800 ${
+            size === 'small' ? 'text-xs px-2 py-2' : ''
+          }`,
+          size !== 'small' && className
+        )}
+      >
+        <div className="flex items-center gap-2 text-red-400 ml-2">
+          <AlertTriangle className={size === 'small' ? 'h-3 w-3' : 'h-4 w-4'} />
+          <span>{error || 'No data available'}</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleManualRefresh}
+          className="text-blue-400 hover:text-blue-300 transition-colors mr-2 ml-2"
+          title="Retry"
+        >
+          <RefreshCw className={size === 'small' ? 'h-3 w-3' : 'h-4 w-4'} />
+        </button>
+      </div>
+    );
+  }
+
+  const windDirection = metarData.wdir;
+  const windSpeed = metarData.wspd;
+  const windGust = metarData.wgst;
+  const formattedDirection =
+    windDirection != null
+      ? windDirection.toString().padStart(3, '0') + '°'
+      : 'VRB';
+  const gustInfo = windGust ? `G${windGust}` : '';
+  const windColors = getWindSeverityColor(windSpeed, windGust);
+  const pressureDisplay = formatPressure(metarData.altim);
+
+  if (size === 'small') {
+    return (
+      <div
+        id="wind-display"
+        className="flex flex-col rounded-2xl border border-gray-700 px-4 py-1 bg-gray-800"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1">
+            <Wind className={`h-4 w-4 ${windColors.icon}`} />
+            <span className={`font-mono font-semibold ${windColors.text}`}>
+              {formattedDirection} {windSpeed}
+              {gustInfo} kt
+            </span>
+          </div>
+
+          <div className="h-5 border-l border-gray-700 mx-2" />
+
+          <button
+            type="button"
+            onClick={togglePressureFormat}
+            className={`flex items-center gap-1 font-mono transition-colors ${
+              showAltimeter
+                ? 'text-blue-400 hover:text-blue-300'
+                : 'text-green-400 hover:text-green-300'
+            }`}
+            title={`Toggle to ${showAltimeter ? 'QNH' : 'altimeter'}`}
+          >
+            <Gauge
+              className={`h-4 w-4 ${showAltimeter ? 'text-blue-400' : 'text-green-400'}`}
+            />
+            <span>
+              {pressureDisplay.value}
+              {pressureDisplay.unit}
+            </span>
+          </button>
+        </div>
+        <div className="flex items-center gap-2 mt-1 text-gray-400 text-sm flex-wrap">
+          {refreshMiss && (
+            <span
+              className="text-amber-500 text-xs"
+              title="Weather service unreachable"
+            >
+              Could not refresh
+            </span>
+          )}
+          <Clock className={`h-4 w-4 ${isSpecial ? 'text-orange-400' : ''}`} />
+          <div className="relative group">
+            <span
+              className={isSpecial ? 'text-orange-400 hover:cursor-help' : ''}
+              aria-describedby={
+                isSpecial ? `${icao}-special-tooltip-small` : undefined
+              }
+            >
+              {formatRefreshTime(lastRefreshed)}
+            </span>
+            {isSpecial && (
+              <div
+                id={`${icao}-special-tooltip-small`}
+                role="tooltip"
+                className="absolute top-8 left-0 z-10 w-max px-2 py-1 text-xs bg-yellow-800 text-white rounded shadow pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-0 whitespace-nowrap"
+              >
+                There is no data for {icao}. This data is from{' '}
+                {metarSubstitute?.icao} which is {metarSubstitute?.distance}{' '}
+                away.
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            className="text-blue-400 hover:text-blue-300 transition-colors ml-2"
+            title="Refresh"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      id="wind-display"
+      className={cn(
+        'flex flex-col rounded-3xl border border-gray-800 px-4 py-3.5 bg-gray-900',
+        className
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Wind className={`h-5 w-5 ${windColors.icon}`} />
+            <span className={`font-mono text-lg font-bold ${windColors.text}`}>
+              {formattedDirection} {windSpeed}
+              {gustInfo}kt
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-gray-300">Temp: {metarData.temp}°C</span>
+            <span className="text-gray-300">Vis: {metarData.visib}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={togglePressureFormat}
+            className="flex items-center gap-1.5 transition-colors"
+            title={`Click to toggle to ${showAltimeter ? 'QNH' : 'altimeter setting'}`}
+          >
+            <Gauge
+              className={`h-4 w-4 ${showAltimeter ? 'text-blue-400' : 'text-green-400'}`}
+            />
+            <span
+              className={`font-mono font-semibold ${
+                showAltimeter
+                  ? 'text-blue-400 hover:text-blue-300'
+                  : 'text-green-400 hover:text-green-300'
+              }`}
+            >
+              {pressureDisplay.value}
+              {pressureDisplay.unit}
+            </span>
+          </button>
+
+          <span
+            className={`text-sm font-bold px-2 py-1 rounded ${getFlightCategoryColor(
+              metarData.fltCat
+            )}`}
+          >
+            {metarData.fltCat}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mt-3">
+        <div className="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
+          {refreshMiss && (
+            <span
+              className="text-amber-500/90 max-w-56"
+              title="Weather service unreachable; values may be outdated"
+            >
+              Could not refresh — showing last report
+            </span>
+          )}
+          <div className="relative group">
+            <span
+              className={isSpecial ? 'text-orange-400 hover:cursor-help' : ''}
+              aria-describedby={
+                isSpecial ? `${icao}-special-tooltip` : undefined
+              }
+            >
+              {metarData.name}
+            </span>
+
+            {isSpecial && (
+              <div
+                id={`${icao}-special-tooltip`}
+                role="tooltip"
+                className="absolute top-8 left-0 z-10 w-max px-2 py-1 text-xs bg-yellow-800 text-white rounded shadow pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-0 whitespace-nowrap"
+              >
+                There is no data for {icao}. This data is from{' '}
+                {metarSubstitute?.icao} which is {metarSubstitute?.distance}{' '}
+                away.
+              </div>
+            )}
+          </div>
+
+          <span>{formatRefreshTime(lastRefreshed)}</span>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleManualRefresh}
+          className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          title="Refresh METAR data"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Refresh
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default WindDisplay;

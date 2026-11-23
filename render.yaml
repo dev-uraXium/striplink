@@ -1,0 +1,50 @@
+# Render Blueprint — one free Docker web service + one free Key Value (Redis).
+# Postgres lives on Supabase (Render's free Postgres expires after 30 days).
+# Deploy: Render dashboard → New → Blueprint → pick this repo.
+services:
+  - type: web
+    name: striplink
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 9900
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: striplink-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: IP_HASH_SECRET
+        generateValue: true
+      - key: CHART_SUBJECT_SECRET
+        generateValue: true
+      # Fill these in on the Render dashboard when the Blueprint asks:
+      - key: FRONTEND_URL          # e.g. https://striplink.onrender.com
+        sync: false
+      - key: POSTGRES_DB_URL       # Supabase → Connect → Session pooler URI
+        sync: false
+      - key: DB_ENCRYPTION_KEY     # 128 hex chars
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_REDIRECT_URI  # https://<your host>/api/auth/discord/callback
+        sync: false
+      - key: ADMIN_IDS             # your Discord user id(s), comma separated
+        sync: false
+
+  - type: keyvalue
+    name: striplink-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []   # internal connections only

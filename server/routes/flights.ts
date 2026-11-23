@@ -1,0 +1,686 @@
+import express from 'express';
+import multer from 'multer';
+import FormData from 'form-data';
+import axios from 'axios';
+import requireAuth, { optionalAuth } from '../middleware/auth.js';
+import {
+  requireFlightAccess,
+  requireFlightDeleteAccess,
+} from '../middleware/flightAccess.js';
+import {
+  getFlightsByUser,
+  getFlightByIdForUser,
+  getFlightLogsForUser,
+  claimFlightForUser,
+  getFlightById,
+  getPublicFlightById,
+  updateFlight,
+  deleteFlight,
+  validateAcarsAccess,
+  updateFlightNotes,
+  addSnapImage,
+  countSnapImages,
+  deleteSnapImage,
+  toggleFeaturedOnProfile,
+} from '../db/flights.js';
+import { getAllFlightsForSession } from '../realtime/flightsRead.js';
+import { getPlanLimits } from '../billing/limits.js';
+import {
+  broadcastFlightEvent,
+} from '../websockets/flightsWebsocket.js';
+import { getSessionById } from '../db/sessions.js';
+import { getClientIp } from '../utils/getIpAddress.js';
+import { submitFlightAndBroadcast } from '../services/submitFlight.js';
+import { mainDb, redisConnection } from '../db/connection.js';
+import { keys } from '../realtime/keys.js';
+import {
+  flightCreationLimiter,
+  acarsValidationLimiter,
+  generalApiLimiter,
+} from '../middleware/rateLimiting.js';
+import { validateCallsign } from '../utils/validation.js';
+import { validateRoute } from '../utils/routeValidation.js';
+
+const snapUpload = multer({ storage: multer.memoryStorage() });
+const CEPHIE_API_KEY = process.env.CEPHIE_API_KEY;
+const CEPHIE_API_BASE = 'https://api.cephie.app';
+const CEPHIE_UPLOAD_URL = `${CEPHIE_API_BASE}/api/v1/images/upload`;
+
+function getCephieIdFromUrl(url: string): string | null {
+  if (!url || !url.startsWith('https://api.cephie.app/')) return null;
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    if (parts[0] === 'img' && parts.length === 2) return parts[1];
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const router = express.Router();
+
+const activeAcarsTerminals = new Map<
+  string,
+  {
+    sessionId: string;
+    flightId: string;
+    connectedAt: string;
+    lastSeen: number;
+  }
+>();
+
+// Cleanup old ACARS terminals periodically
+const cleanupAcarsTerminals = () => {
+  const now = Date.now();
+  const INACTIVE_THRESHOLD = 10 * 60 * 1000;
+  let removedCount = 0;
+
+  for (const [key, terminal] of activeAcarsTerminals.entries()) {
+    if (now - terminal.lastSeen > INACTIVE_THRESHOLD) {
+      activeAcarsTerminals.delete(key);
+      removedCount++;
+    }
+  }
+
+  if (removedCount > 0) {
+    console.log(`[ACARS] Cleaned up ${removedCount} inactive terminals`);
+  }
+};
+
+const acarsCleanupInterval = setInterval(cleanupAcarsTerminals, 5 * 60 * 1000);
+
+// Cleanup on shutdown
+process.on('SIGTERM', () => {
+  console.log('[ACARS] Cleaning up...');
+  clearInterval(acarsCleanupInterval);
+  activeAcarsTerminals.clear();
+});
+
+// GET: /api/flights/me - get flights submitted by current user
+router.get('/me/list', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const flights = await getFlightsByUser(req.user.userId);
+    res.json(flights);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch your flights' });
+  }
+});
+
+// GET: /api/flights/me/:flightId - get one owned flight
+router.get('/me/:flightId', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const flight = await getFlightByIdForUser(
+      req.user.userId,
+      req.params.flightId
+    );
+    if (!flight) return res.status(404).json({ error: 'Flight not found' });
+    res.json(flight);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch flight' });
+  }
+});
+
+// PATCH: /api/flights/me/:flightId/notes - save personal notes for owned flight
+router.patch('/me/:flightId/notes', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const { notes } = req.body ?? {};
+    if (typeof notes !== 'string' || notes.length > 2000) {
+      return res
+        .status(400)
+        .json({ error: 'Notes must be a string under 2000 characters' });
+    }
+    await updateFlightNotes(req.user.userId, req.params.flightId, notes);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to save notes' });
+  }
+});
+
+// POST: /api/flights/me/:flightId/snap - upload a Cephie Snap photo for owned flight
+router.post(
+  '/me/:flightId/snap',
+  requireAuth,
+  snapUpload.single('image'),
+  async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+      const userId = req.user.userId;
+      const { flightId } = req.params;
+      const file = req.file;
+
+      if (!file || !file.mimetype.startsWith('image/')) {
+        return res.status(400).json({ error: 'Invalid or missing image file' });
+      }
+
+      const [snapCount, { snapsPerFlight }] = await Promise.all([
+        countSnapImages(userId, flightId),
+        getPlanLimits(userId),
+      ]);
+      if (snapCount === null) {
+        return res
+          .status(404)
+          .json({ error: 'Flight not found or not owned by you' });
+      }
+      if (snapCount >= snapsPerFlight) {
+        return res.status(409).json({
+          error: `You can add up to ${snapsPerFlight} photos per flight`,
+          limit: snapsPerFlight,
+        });
+      }
+
+      const formData = new FormData();
+      formData.append('image', file.buffer, file.originalname);
+
+      const uploadResponse = await axios.post(CEPHIE_UPLOAD_URL, formData, {
+        headers: {
+          'x-user-id': userId,
+          'x-api-key': CEPHIE_API_KEY,
+          ...formData.getHeaders(),
+        },
+        maxBodyLength: Infinity,
+      });
+
+      const imageUrl = uploadResponse.data?.url;
+      if (!imageUrl) {
+        return res
+          .status(500)
+          .json({ error: 'No URL returned from Cephie upload' });
+      }
+
+      const cephieId = getCephieIdFromUrl(imageUrl) ?? imageUrl;
+      const result = await addSnapImage(
+        userId,
+        flightId,
+        cephieId,
+        imageUrl,
+        snapsPerFlight
+      );
+      if (!result.ok) {
+        // Clean up uploaded image since DB update failed
+        try {
+          await axios.delete(`${CEPHIE_API_BASE}/api/v1/images/${cephieId}`, {
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': CEPHIE_API_KEY,
+            },
+            data: { userId },
+          });
+        } catch {
+          /* best-effort */
+        }
+        return result.atCap
+          ? res.status(409).json({
+              error: `You can add up to ${snapsPerFlight} photos per flight`,
+              limit: snapsPerFlight,
+            })
+          : res
+              .status(404)
+              .json({ error: 'Flight not found or not owned by you' });
+      }
+
+      res.json({
+        url: imageUrl,
+        cephie_id: cephieId,
+        snap_images: result.snap_images,
+      });
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error(
+          'Cephie Snap upload error:',
+          error.response?.data || error.message
+        );
+        return res.status(500).json({
+          error: 'Failed to upload snap',
+          details: error.response?.data,
+        });
+      }
+      console.error('Snap upload error:', error);
+      res.status(500).json({ error: 'Failed to upload snap' });
+    }
+  }
+);
+
+// DELETE: /api/flights/me/:flightId/snap/:cephieId - delete a Cephie Snap photo
+router.delete('/me/:flightId/snap/:cephieId', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const userId = req.user.userId;
+    const { flightId, cephieId } = req.params;
+
+    const result = await deleteSnapImage(userId, flightId, cephieId);
+    if (!result.ok) {
+      return res
+        .status(404)
+        .json({ error: 'Snap not found or not owned by you' });
+    }
+
+    // Delete from Cephie
+    try {
+      await axios.delete(`${CEPHIE_API_BASE}/api/v1/images/${cephieId}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': CEPHIE_API_KEY,
+        },
+        data: { userId },
+      });
+    } catch (err) {
+      console.warn('Failed to delete image from Cephie (continuing):', err);
+    }
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to delete snap' });
+  }
+});
+
+// PATCH: /api/flights/me/:flightId/feature - toggle featured on profile
+router.patch('/me/:flightId/feature', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const { featuredFlights } = await getPlanLimits(req.user.userId);
+    const result = await toggleFeaturedOnProfile(
+      req.user.userId,
+      req.params.flightId,
+      featuredFlights
+    );
+    if (!result.ok) {
+      if (result.atCap)
+        return res.status(409).json({
+          error: `You can only feature up to ${featuredFlights} flights on your profile`,
+          limit: featuredFlights,
+        });
+      return res
+        .status(404)
+        .json({ error: 'Flight not found or not owned by you' });
+    }
+    res.json({ featured: result.featured });
+  } catch {
+    res.status(500).json({ error: 'Failed to toggle featured status' });
+  }
+});
+
+// GET: /api/flights/me/:flightId/logs - get owned flight logs
+router.get('/me/:flightId/logs', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const logsData = await getFlightLogsForUser(
+      req.user.userId,
+      req.params.flightId
+    );
+    res.json(logsData);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch flight logs' });
+  }
+});
+
+// POST: /api/flights/claim - claim a just-submitted guest flight after login
+router.post('/claim', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { sessionId, flightId, acarsToken } = req.body ?? {};
+    if (!sessionId || !flightId || !acarsToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const result = await claimFlightForUser(
+      String(sessionId),
+      String(flightId),
+      String(acarsToken),
+      req.user.userId
+    );
+
+    if (!result.ok) {
+      if (result.reason === 'not_found') {
+        return res.status(404).json({ error: 'Flight not found' });
+      }
+      if (result.reason === 'invalid_token') {
+        return res.status(403).json({ error: 'Invalid claim token' });
+      }
+      if (result.reason === 'already_claimed') {
+        return res.status(409).json({ error: 'Flight already claimed' });
+      }
+      return res.status(400).json({ error: 'Unable to claim flight' });
+    }
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to claim flight' });
+  }
+});
+
+// GET: /api/flights/:sessionId/:flightId/acars-flight - get specific flight for ACARS token
+router.get(
+  '/:sessionId/:flightId/acars-flight',
+  acarsValidationLimiter,
+  async (req, res) => {
+    try {
+      const { sessionId, flightId } = req.params;
+      const acarsToken =
+        typeof req.query.acars_token === 'string'
+          ? req.query.acars_token
+          : undefined;
+
+      if (!acarsToken) {
+        return res.status(400).json({ error: 'Missing access token' });
+      }
+
+      const validation = await validateAcarsAccess(
+        sessionId,
+        flightId,
+        acarsToken
+      );
+      if (!validation.valid) {
+        return res.status(403).json({ error: 'Invalid ACARS token' });
+      }
+
+      const flight = await getFlightById(sessionId, flightId);
+      if (!flight) {
+        return res.status(404).json({ error: 'Flight not found' });
+      }
+
+      const { ip_address, acars_token, ...sanitizedFlight } = flight;
+      void ip_address;
+      void acars_token;
+      res.json(sanitizedFlight);
+    } catch {
+      res.status(500).json({ error: 'Failed to load flight' });
+    }
+  }
+);
+
+// GET: /api/flights/public/:flightId - get a publicly shared flight (no auth required)
+router.get('/public/:flightId', generalApiLimiter, async (req, res) => {
+  try {
+    const flight = await getPublicFlightById(req.params.flightId);
+    if (!flight) {
+      return res.status(404).json({ error: 'Flight not found' });
+    }
+    const { ip_address, acars_token, ...sanitizedFlight } = flight;
+    void ip_address;
+    void acars_token;
+    res.json(sanitizedFlight);
+  } catch {
+    res.status(500).json({ error: 'Failed to load flight' });
+  }
+});
+
+// POST: /api/flights/validate-route
+router.post('/validate-route', generalApiLimiter, (req, res) => {
+  const { route, departure, arrival, flight_type } = req.body ?? {};
+  if (typeof route !== 'string' || !route.trim() || flight_type === 'VFR') {
+    return res.json({ error: null });
+  }
+  const error = validateRoute(
+    route,
+    typeof departure === 'string' ? departure : undefined,
+    typeof arrival === 'string' ? arrival : undefined
+  );
+  res.json({ error: error ?? null });
+});
+
+// GET: /api/flights/:sessionId - get all flights for a session
+router.get('/:sessionId', requireAuth, async (req, res) => {
+  try {
+    const flights = await getAllFlightsForSession(req.params.sessionId);
+    res.json(flights);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch flights' });
+  }
+});
+
+// POST: /api/flights/:sessionId - add a flight to a session
+router.post(
+  '/:sessionId',
+  flightCreationLimiter,
+  optionalAuth,
+  async (req, res) => {
+    try {
+      const flightData = {
+        ...req.body,
+        user_id: req.user?.userId,
+        ip_address: getClientIp(req),
+      };
+
+      const { flight, acarsRedirectUrl } = await submitFlightAndBroadcast(
+        req.params.sessionId,
+        flightData,
+        { submitterUserId: req.user?.userId }
+      );
+
+      res
+        .status(201)
+        .json(acarsRedirectUrl ? { ...flight, acarsRedirectUrl } : flight);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      if (message.startsWith('Callsign') || message.startsWith('Route error')) {
+        return res.status(400).json({ error: message });
+      }
+      console.error('Failed to add flight:', err);
+      res.status(500).json({ error: 'Failed to add flight' });
+    }
+  }
+);
+
+// PUT: /api/flights/:sessionId/:flightId - update a flight
+router.put(
+  '/:sessionId/:flightId',
+  requireAuth,
+  requireFlightAccess,
+  async (req, res) => {
+    try {
+      if (req.body.callsign) {
+        try {
+          req.body.callsign = validateCallsign(req.body.callsign);
+        } catch (err) {
+          return res.status(400).json({
+            error: err instanceof Error ? err.message : 'Invalid callsign',
+          });
+        }
+      }
+
+      if (req.body.stand && req.body.stand.length > 8) {
+        return res.status(400).json({ error: 'Stand too long' });
+      }
+      const flight = await updateFlight(
+        req.params.sessionId,
+        req.params.flightId,
+        req.body
+      );
+      if (!flight) {
+        return res.status(404).json({ error: 'Flight not found' });
+      }
+
+      broadcastFlightEvent(req.params.sessionId, 'flightUpdated', flight);
+
+      res.json(flight);
+    } catch {
+      res.status(500).json({ error: 'Failed to update flight' });
+    }
+  }
+);
+
+// DELETE: /api/flights/:sessionId/:flightId - delete a flight
+router.delete(
+  '/:sessionId/:flightId',
+  requireAuth,
+  requireFlightDeleteAccess,
+  async (req, res) => {
+    try {
+      await deleteFlight(req.params.sessionId, req.params.flightId);
+
+      broadcastFlightEvent(req.params.sessionId, 'flightDeleted', {
+        flightId: req.params.flightId,
+      });
+
+      getSessionById(req.params.sessionId)
+        .then((session) => {
+          if (session?.created_by) {
+            redisConnection
+              .del(keys.userSessions(session.created_by))
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+
+      res.json({ success: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to delete flight' });
+    }
+  }
+);
+
+// GET: /api/flights/:sessionId/:flightId/validate-acars
+router.get(
+  '/:sessionId/:flightId/validate-acars',
+  acarsValidationLimiter,
+  async (req, res) => {
+    try {
+      const { sessionId, flightId } = req.params;
+      const acarsToken =
+        typeof req.query.acars_token === 'string'
+          ? req.query.acars_token
+          : undefined;
+
+      if (!acarsToken) {
+        return res
+          .status(400)
+          .json({ valid: false, error: 'Missing access token' });
+      }
+
+      const result = await validateAcarsAccess(sessionId, flightId, acarsToken);
+      res.json(result);
+    } catch {
+      res.status(500).json({ valid: false, error: 'Validation failed' });
+    }
+  }
+);
+
+// POST: /api/flights/acars/active - mark ACARS terminal as active
+router.post('/acars/active', acarsValidationLimiter, async (req, res) => {
+  try {
+    const { sessionId, flightId, acarsToken } = req.body;
+
+    if (!sessionId || !flightId || !acarsToken) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const result = await validateAcarsAccess(sessionId, flightId, acarsToken);
+    if (!result.valid) {
+      return res.status(403).json({ error: 'Invalid ACARS token' });
+    }
+
+    const key = `${sessionId}:${flightId}`;
+    activeAcarsTerminals.set(key, {
+      sessionId,
+      flightId,
+      connectedAt: new Date().toISOString(),
+      lastSeen: Date.now(),
+    });
+
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to mark ACARS as active' });
+  }
+});
+
+// DELETE: /api/flights/acars/active/:sessionId/:flightId
+router.delete('/acars/active/:sessionId/:flightId', async (req, res) => {
+  try {
+    const { sessionId, flightId } = req.params;
+    const key = `${sessionId}:${flightId}`;
+    activeAcarsTerminals.delete(key);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to mark ACARS as inactive' });
+  }
+});
+
+// GET: /api/flights/acars/active - get all active ACARS terminals
+router.get('/acars/active', async (_req, res) => {
+  try {
+    interface ActiveFlight {
+      [key: string]: unknown;
+    }
+    const activeFlights: ActiveFlight[] = [];
+
+    for (const [key, terminal] of activeAcarsTerminals.entries()) {
+      const { sessionId, flightId } = terminal;
+      terminal.lastSeen = Date.now();
+
+      try {
+        const result = await mainDb
+          .selectFrom('flights')
+          .selectAll()
+          .where('session_id', '=', sessionId)
+          .where('id', '=', flightId)
+          .execute();
+
+        if (result.length > 0) {
+          activeFlights.push(result[0]);
+        }
+      } catch {
+        activeAcarsTerminals.delete(key);
+      }
+    }
+
+    const userIds = [
+      ...new Set(activeFlights.map((f) => f.user_id).filter(Boolean)),
+    ];
+    const usersMap = new Map();
+
+    if (userIds.length > 0) {
+      try {
+        const users = await mainDb
+          .selectFrom('users')
+          .select([
+            'id',
+            'username as discord_username',
+            'avatar as discord_avatar_url',
+          ])
+          .where('id', 'in', userIds as string[])
+          .execute();
+
+        users.forEach((user) => {
+          usersMap.set(user.id, {
+            discord_username: user.discord_username,
+            discord_avatar_url: user.discord_avatar_url
+              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.discord_avatar_url}.png`
+              : null,
+          });
+        });
+      } catch {
+        // ignore user fetch errors
+      }
+    }
+
+    interface SanitizedFlight {
+      [key: string]: unknown;
+      user?: { discord_username: string; discord_avatar_url: string | null };
+    }
+
+    const enrichedFlights = activeFlights.map(
+      (flight: Record<string, unknown>) => {
+        const {
+          user_id,
+          ip_address: _ipAddress,
+          acars_token: _acarsToken,
+          ...sanitizedFlight
+        } = flight;
+        if (user_id && usersMap.has(user_id)) {
+          (sanitizedFlight as SanitizedFlight).user = usersMap.get(user_id);
+        }
+        return sanitizedFlight as SanitizedFlight;
+      }
+    );
+
+    res.json(enrichedFlights);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch active ACARS terminals' });
+  }
+});
+
+export default router;

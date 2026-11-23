@@ -1,0 +1,20 @@
+export interface SessionsTable {
+  session_id: string;
+  access_id: string;
+  active_runway?: string;
+  arrival_runway?: string | null;
+  airport_icao: string;
+  created_at?: Date;
+  created_by: string;
+  is_pfatc?: boolean;
+  is_advanced_atc?: boolean;
+  flight_strips?: unknown;
+  atis?: unknown;
+  custom_name?: string;
+  refreshed_at?: Date;
+  developer_api_key_id?: string | null;
+  feedback_enabled?: boolean;
+  external_session?: boolean | null;
+  form_webhook_secret?: string | null;
+  google_form_id?: string | null;
+}

@@ -1,0 +1,643 @@
+import { Server as SocketIOServer, Socket } from 'socket.io';
+import {
+  addFlight,
+  updateFlight,
+  dropUnchangedFlightFields,
+  deleteFlight,
+  validateAcarsAccess,
+  type AddFlightData,
+  type ClientFlight,
+} from '../db/flights.js';
+import { validateSessionAccess } from '../middleware/sessionAccess.js';
+import { getSessionById, updateSession } from '../db/sessions.js';
+import { mainDb } from '../db/connection.js';
+import {
+  validateSessionId,
+  validateAccessId,
+  validateFlightId,
+} from '../utils/validation.js';
+import {
+  sanitizeCallsign,
+  sanitizeString,
+  sanitizeSquawk,
+  sanitizeFlightLevel,
+  sanitizeRunway,
+} from '../utils/sanitization.js';
+import type { Server as HTTPServer } from 'http';
+import { incrementStat } from '../utils/statisticsCache.js';
+import { logFlightAction } from '../db/flightLogs.js';
+import { getUserById } from '../db/users.js';
+import { isEventController } from '../middleware/flightAccess.js';
+import { setFlightsIO as registerFlightsIO } from '../realtime/socketRegistry.js';
+import { broadcastArrivalChange } from '../realtime/arrivals.js';
+import { createHandshakeRateLimiter } from './handshakeRateLimit.js';
+import { getSocketUser } from './socketAuth.js';
+import { getNetworkKind } from '../utils/advancedNetworkSession.js';
+import { resolveExternalAcarsRedirectUrl } from '../utils/externalAcarsPanel.js';
+import { allowedOrigins } from '../utils/allowedOrigins.js';
+
+interface FlightUpdateData {
+  flightId: string | number;
+  updates: Record<string, unknown>;
+}
+
+interface PDCData {
+  flightId: string | number;
+  pdcText: string;
+  targetPilotUserId?: string;
+}
+
+interface PDCRequestData {
+  flightId?: string | number;
+  note?: string;
+}
+
+interface ContactMeData {
+  flightId: string | number;
+  message?: string;
+  station?: string;
+  position?: string;
+}
+
+interface SessionUpdateData {
+  activeRunway?: string;
+  feedbackEnabled?: boolean;
+}
+
+let io: SocketIOServer;
+
+function getSocketClientIp(socket: Socket): string {
+  if (socket.handshake.headers['cf-connecting-ip']) {
+    const cfIp = socket.handshake.headers['cf-connecting-ip'];
+    return Array.isArray(cfIp) ? cfIp[0] : cfIp;
+  }
+
+  if (socket.handshake.headers['x-forwarded-for']) {
+    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    if (Array.isArray(forwarded)) {
+      return forwarded[0].split(',')[0].trim();
+    }
+    return (forwarded as string).split(',')[0].trim();
+  }
+
+  if (socket.handshake.headers['x-real-ip']) {
+    const realIp = socket.handshake.headers['x-real-ip'];
+    return Array.isArray(realIp) ? realIp[0] : realIp;
+  }
+
+  return socket.handshake.address || 'unknown';
+}
+
+export function setupFlightsWebsocket(httpServer: HTTPServer): SocketIOServer {
+  io = new SocketIOServer(httpServer, {
+    path: '/sockets/flights',
+    allowRequest: createHandshakeRateLimiter({ scope: 'flights' }),
+    cors: {
+      origin: allowedOrigins(),
+      credentials: true,
+    },
+    pingTimeout: 10000,
+    pingInterval: 5000,
+    upgradeTimeout: 3000,
+    allowUpgrades: true,
+    perMessageDeflate: {
+      threshold: 1024,
+    },
+  });
+
+  io.on('connection', async (socket: Socket) => {
+    // The client sees 'connect' before the async auth below has finished and
+    // the listeners exist; without this gate its first emits are dropped.
+    let markReady!: () => void;
+    const ready = new Promise<void>((resolve) => (markReady = resolve));
+    socket.use((_packet, next) => void ready.then(() => next()));
+
+    const sessionId = socket.handshake.query.sessionId as string;
+    const accessId = socket.handshake.query.accessId as string;
+    const acarsToken = socket.handshake.query.acarsToken;
+    const acarsFlightId = socket.handshake.query.flightId;
+    const isEventControllerFlag =
+      socket.handshake.query.isEventController === 'true';
+
+    // Identity comes only from the verified auth cookie. handshake.query.userId
+    // is client-controlled and is ignored; anonymous pilots have no userId.
+    const socketUser = await getSocketUser(socket);
+    const userId = socketUser?.userId;
+    const username = socketUser?.username;
+
+    try {
+      const validSessionId = validateSessionId(sessionId);
+      socket.data.sessionId = validSessionId;
+
+      let role: 'pilot' | 'controller' = 'pilot';
+
+      if (isEventControllerFlag) {
+        const hasEventControllerRole = userId
+          ? await isEventController(userId)
+          : false;
+        if (hasEventControllerRole) {
+          const session = await mainDb
+            .selectFrom('sessions')
+            .select(['is_pfatc', 'is_advanced_atc'])
+            .where('session_id', '=', validSessionId)
+            .executeTakeFirst();
+
+          if (session?.is_pfatc) {
+            role = 'controller';
+            socket.data.isEventController = true;
+            socket.data.networkKind = getNetworkKind(session);
+          } else {
+            console.error(
+              'Event controller attempted to connect to non-network session:',
+              validSessionId
+            );
+            socket.disconnect(true);
+            return;
+          }
+        } else {
+          console.error(
+            'User claimed to be event controller but lacks role:',
+            userId
+          );
+          socket.disconnect(true);
+          return;
+        }
+      } else if (accessId) {
+        const validAccessId = validateAccessId(accessId);
+        const valid = await validateSessionAccess(
+          validSessionId,
+          validAccessId
+        );
+        if (!valid) {
+          socket.disconnect(true);
+          return;
+        }
+        role = 'controller';
+        socket.data.isEventController = false;
+        // Fetch session kind so arrival broadcasts stay within the same network
+        const sessionRow = await mainDb
+          .selectFrom('sessions')
+          .select(['is_pfatc', 'is_advanced_atc'])
+          .where('session_id', '=', validSessionId)
+          .executeTakeFirst();
+        socket.data.networkKind = sessionRow
+          ? getNetworkKind(sessionRow)
+          : null;
+      } else if (acarsToken !== undefined) {
+        if (
+          typeof acarsToken !== 'string' ||
+          typeof acarsFlightId !== 'string'
+        ) {
+          socket.disconnect(true);
+          return;
+        }
+        const { valid } = await validateAcarsAccess(
+          validSessionId,
+          acarsFlightId,
+          acarsToken
+        );
+        if (!valid) {
+          socket.disconnect(true);
+          return;
+        }
+        socket.data.flightId = validateFlightId(acarsFlightId);
+      }
+
+      socket.data.role = role;
+      socket.join(validSessionId);
+    } catch {
+      socket.disconnect(true);
+      return;
+    }
+
+    socket.on('addFlight', async (flightData: Partial<AddFlightData>) => {
+      const sessionId = socket.data.sessionId;
+      try {
+        const enhancedFlightData = {
+          ...flightData,
+          user_id: userId,
+          ip_address: socket.handshake.address,
+        };
+
+        const flight = await addFlight(
+          sessionId,
+          enhancedFlightData as AddFlightData,
+          { submitterUserId: userId }
+        );
+
+        const { acars_token: _acars, ...sanitizedFlight } = flight;
+        socket.to(sessionId).emit('flightAdded', sanitizedFlight);
+
+        const acarsRedirectUrl = await resolveExternalAcarsRedirectUrl(
+          await getSessionById(sessionId),
+          flight
+        );
+        socket.emit(
+          'flightAdded',
+          acarsRedirectUrl ? { ...flight, acarsRedirectUrl } : flight
+        );
+
+        await logFlightAction({
+          userId: userId || 'unknown',
+          username: username || 'unknown',
+          sessionId,
+          action: 'add',
+          flightId: flight.id,
+          newData: {
+            ...sanitizedFlight,
+            flight_owner_user_id: userId || null,
+            flight_owner_username: username || null,
+          },
+          ipAddress: getSocketClientIp(socket),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        socket.emit('flightError', {
+          action: 'add',
+          error:
+            message.startsWith('Callsign') || message.startsWith('Route error')
+              ? message
+              : 'Failed to add flight',
+        });
+      }
+    });
+
+    socket.on(
+      'updateFlight',
+      async ({ flightId, updates }: FlightUpdateData) => {
+        const sessionId = socket.data.sessionId;
+        if (socket.data.role !== 'controller') {
+          socket.emit('flightError', {
+            action: 'update',
+            flightId,
+            error: 'Not authorized',
+          });
+          return;
+        }
+
+        try {
+          validateFlightId(flightId);
+          if (Object.prototype.hasOwnProperty.call(updates, 'hidden')) {
+            return;
+          }
+
+          const oldFlight = await mainDb
+            .selectFrom('flights')
+            .selectAll()
+            .where('session_id', '=', sessionId)
+            .where('id', '=', flightId as string)
+            .executeTakeFirst();
+
+          socket.emit('flightUpdateAck', { flightId, updates });
+
+          if (updates.callsign && typeof updates.callsign === 'string')
+            updates.callsign = sanitizeCallsign(updates.callsign);
+          if (updates.remark && typeof updates.remark === 'string')
+            updates.remark = sanitizeString(updates.remark, 500);
+          if (updates.squawk && typeof updates.squawk === 'string')
+            updates.squawk = sanitizeSquawk(updates.squawk);
+          if (updates.clearedFL && typeof updates.clearedFL === 'string')
+            updates.clearedFL = sanitizeFlightLevel(updates.clearedFL);
+          if (updates.cruisingFL && typeof updates.cruisingFL === 'string')
+            updates.cruisingFL = sanitizeFlightLevel(updates.cruisingFL);
+          if (updates.runway && typeof updates.runway === 'string')
+            updates.runway = sanitizeRunway(updates.runway);
+          if (updates.stand && typeof updates.stand === 'string')
+            updates.stand = sanitizeString(updates.stand, 8);
+          if (updates.gate && typeof updates.gate === 'string')
+            updates.gate = sanitizeString(updates.gate, 8);
+          if (updates.sid && typeof updates.sid === 'string')
+            updates.sid = sanitizeString(updates.sid, 16);
+          if (updates.star && typeof updates.star === 'string')
+            updates.star = sanitizeString(updates.star, 16);
+
+          if (updates.clearance !== undefined) {
+            if (typeof updates.clearance === 'string') {
+              updates.clearance = updates.clearance.toLowerCase() === 'true';
+            }
+          }
+
+          const changes = dropUnchangedFlightFields(oldFlight, updates);
+          if (Object.keys(changes).length === 0) return;
+
+          if (userId) {
+            incrementStat(
+              userId,
+              'total_flight_edits',
+              1,
+              'total_edit_actions'
+            );
+          }
+
+          const updatedFlight = await updateFlight(
+            sessionId,
+            flightId as string,
+            changes
+          );
+          if (updatedFlight) {
+            io.to(sessionId).emit('flightUpdated', updatedFlight);
+
+            // Awaited so this write survives a server restart landing
+            // between the emit above and the log getting written.
+            const {
+              acars_token: _,
+              user_id: flightOwnerUserId,
+              ip_address: ___,
+              ...oldSanitized
+            } = oldFlight || {};
+            const flightOwner = flightOwnerUserId
+              ? await getUserById(flightOwnerUserId)
+              : null;
+            await logFlightAction({
+              userId: userId || 'unknown',
+              username: username || 'unknown',
+              sessionId,
+              action: 'update',
+              flightId: flightId as string,
+              oldData: {
+                ...oldSanitized,
+                flight_owner_user_id: flightOwnerUserId || null,
+                flight_owner_username: flightOwner?.username || null,
+              },
+              newData: changes,
+              ipAddress: getSocketClientIp(socket),
+            });
+          } else {
+            socket.emit('flightError', {
+              action: 'update',
+              flightId,
+              error: 'Flight not found',
+            });
+          }
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          console.error('Error updating flight:', error);
+          socket.emit('flightError', {
+            action: 'update',
+            flightId,
+            error: errorMessage || 'Failed to update flight',
+          });
+        }
+      }
+    );
+
+    socket.on('deleteFlight', async (flightId: string | number) => {
+      const sessionId = socket.data.sessionId;
+      if (socket.data.role !== 'controller') {
+        socket.emit('flightError', {
+          action: 'delete',
+          flightId,
+          error: 'Not authorized',
+        });
+        return;
+      }
+      try {
+        const flightToDelete = await mainDb
+          .selectFrom('flights')
+          .selectAll()
+          .where('session_id', '=', sessionId)
+          .where('id', '=', flightId as string)
+          .executeTakeFirst();
+        const {
+          acars_token: _acarsToken,
+          user_id: flightOwnerUserId,
+          ip_address: _ipAddress,
+          ...sanitizedOldData
+        } = flightToDelete || {};
+
+        const flightOwner = flightOwnerUserId
+          ? await getUserById(flightOwnerUserId)
+          : null;
+
+        await deleteFlight(sessionId, flightId as string);
+        io.to(sessionId).emit('flightDeleted', { flightId });
+
+        // Awaited so this write survives a server restart landing between
+        // the emit above and the log getting written.
+        await logFlightAction({
+          userId: userId || 'unknown',
+          username: username || 'unknown',
+          sessionId,
+          action: 'delete',
+          flightId: flightId as string,
+          oldData: {
+            ...sanitizedOldData,
+            flight_owner_user_id: flightOwnerUserId || null,
+            flight_owner_username: flightOwner?.username || null,
+          },
+          ipAddress: getSocketClientIp(socket),
+        });
+      } catch {
+        socket.emit('flightError', {
+          action: 'delete',
+          flightId,
+          error: 'Failed to delete flight',
+        });
+      }
+    });
+
+    socket.on('updateSession', async (updates: SessionUpdateData) => {
+      const sessionId = socket.data.sessionId;
+      if (socket.data.role !== 'controller') {
+        socket.emit('sessionError', { error: 'Not authorized' });
+        return;
+      }
+      try {
+        const dbUpdates: Record<string, unknown> = {};
+        if (updates.activeRunway !== undefined) {
+          dbUpdates.active_runway = updates.activeRunway;
+        }
+        if (updates.feedbackEnabled !== undefined) {
+          dbUpdates.feedback_enabled = updates.feedbackEnabled;
+        }
+
+        const updatedSession = await updateSession(sessionId, dbUpdates);
+        if (updatedSession) {
+          io.to(sessionId).emit('sessionUpdated', {
+            activeRunway: updatedSession.active_runway,
+            feedbackEnabled: updatedSession.feedback_enabled ?? true,
+          });
+        } else {
+          socket.emit('sessionError', {
+            error: 'Session not found or update failed',
+          });
+        }
+      } catch {
+        socket.emit('sessionError', { error: 'Failed to update session' });
+      }
+    });
+
+    socket.on('issuePDC', async ({ flightId, pdcText }: PDCData) => {
+      const sessionId = socket.data.sessionId;
+      if (socket.data.role !== 'controller') {
+        socket.emit('flightError', {
+          action: 'issuePDC',
+          flightId,
+          error: 'Not authorized',
+        });
+        return;
+      }
+      try {
+        if (!flightId) {
+          socket.emit('flightError', {
+            action: 'issuePDC',
+            error: 'Missing flightId',
+          });
+          return;
+        }
+        validateFlightId(flightId);
+        const sanitizedPDC = sanitizeString(pdcText, 1000);
+        const updates = {
+          pdc_remarks: sanitizedPDC,
+        };
+
+        const updatedFlight = await updateFlight(
+          sessionId,
+          flightId as string,
+          updates
+        );
+        if (updatedFlight) {
+          io.to(sessionId).emit('flightUpdated', updatedFlight);
+          io.to(sessionId).emit('pdcIssued', {
+            flightId,
+            pdcText: sanitizedPDC,
+            updatedFlight,
+          });
+        } else {
+          socket.emit('flightError', {
+            action: 'issuePDC',
+            flightId,
+            error: 'Flight not found',
+          });
+        }
+      } catch {
+        socket.emit('flightError', {
+          action: 'issuePDC',
+          flightId,
+          error: 'Failed to issue PDC',
+        });
+      }
+    });
+
+    socket.on('requestPDC', async ({ flightId, note }: PDCRequestData) => {
+      const sessionId = socket.data.sessionId;
+      const ownFlightId = socket.data.flightId as string | undefined;
+      if (
+        !ownFlightId ||
+        (flightId !== undefined && String(flightId) !== ownFlightId)
+      ) {
+        socket.emit('flightError', {
+          action: 'requestPDC',
+          flightId,
+          error: 'Not authorized',
+        });
+        return;
+      }
+      try {
+        const flight = await mainDb
+          .selectFrom('flights')
+          .select('callsign')
+          .where('session_id', '=', sessionId)
+          .where('id', '=', ownFlightId)
+          .executeTakeFirst();
+        if (!flight) throw new Error('Flight not found');
+        io.to(sessionId).emit('pdcRequest', {
+          flightId: ownFlightId,
+          callsign: flight.callsign ? sanitizeCallsign(flight.callsign) : null,
+          note: note ? sanitizeString(note, 200) : null,
+          requestedBy: userId ?? null,
+          ts: new Date().toISOString(),
+        });
+      } catch {
+        socket.emit('flightError', {
+          action: 'requestPDC',
+          flightId,
+          error: 'Failed to request PDC',
+        });
+      }
+    });
+
+    socket.on(
+      'contactMe',
+      async ({ flightId, message, station, position }: ContactMeData) => {
+        const sessionId = socket.data.sessionId;
+        if (socket.data.role !== 'controller') {
+          socket.emit('flightError', {
+            action: 'contactMe',
+            flightId,
+            station,
+            position,
+            error: 'Not authorized',
+          });
+          return;
+        }
+        try {
+          validateFlightId(flightId);
+          let targetSessionId = sessionId;
+          try {
+            const flightRow = await mainDb
+              .selectFrom('flights')
+              .select('session_id')
+              .where('id', '=', flightId as string)
+              .executeTakeFirst();
+            if (flightRow) targetSessionId = flightRow.session_id;
+          } catch {
+            // fall back to current session
+          }
+
+          const sanitizedMessage = message
+            ? sanitizeString(message, 200)
+            : 'CONTACT CONTROLLER ON FREQUENCY';
+          io.to(targetSessionId).emit('contactMe', {
+            flightId,
+            message: sanitizedMessage,
+            station: station ? sanitizeString(station, 50) : undefined,
+            position: position ? sanitizeString(position, 50) : undefined,
+            ts: new Date().toISOString(),
+          });
+        } catch {
+          socket.emit('flightError', {
+            action: 'contactMe',
+            flightId,
+            error: 'Failed to send contact message',
+          });
+        }
+      }
+    );
+
+    socket.on('disconnect', () => {});
+    markReady();
+  });
+
+  registerFlightsIO(io);
+  return io;
+}
+
+/** @deprecated Use broadcastArrivalChange from server/realtime/arrivals.js */
+export async function broadcastToArrivalSessions(
+  flight: ClientFlight,
+  networkKind: ReturnType<typeof getNetworkKind>,
+  sourceSessionId?: string
+): Promise<void> {
+  if (!networkKind || !flight.arrival) return;
+  await broadcastArrivalChange(
+    flight,
+    sourceSessionId ?? flight.session_id,
+    networkKind
+  );
+}
+
+export function getFlightsIO(): SocketIOServer | undefined {
+  return io;
+}
+
+export function broadcastFlightEvent(
+  sessionId: string,
+  event: string,
+  data: unknown
+): void {
+  if (io) {
+    io.to(sessionId).emit(event, data);
+  }
+}

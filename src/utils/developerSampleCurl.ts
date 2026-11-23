@@ -1,0 +1,171 @@
+const GET_SAMPLES: { scopeId: string; path: string; label: string }[] = [
+  {
+    scopeId: 'data.airports',
+    path: '/data/airports',
+    label: 'GET /data/airports',
+  },
+  {
+    scopeId: 'data.aircrafts',
+    path: '/data/aircrafts',
+    label: 'GET /data/aircrafts',
+  },
+  {
+    scopeId: 'data.airlines',
+    path: '/data/airlines',
+    label: 'GET /data/airlines',
+  },
+  {
+    scopeId: 'data.frequencies',
+    path: '/data/frequencies',
+    label: 'GET /data/frequencies',
+  },
+  {
+    scopeId: 'data.backgrounds',
+    path: '/data/backgrounds',
+    label: 'GET /data/backgrounds',
+  },
+  {
+    scopeId: 'data.find_route',
+    path: '/data/findRoute?from=EGKK&to=LCLK',
+    label: 'GET /data/findRoute',
+  },
+  {
+    scopeId: 'data.airport_runways',
+    path: '/data/airports/EGKK/runways',
+    label: 'GET /data/airports/…/runways',
+  },
+  {
+    scopeId: 'data.airport_sids',
+    path: '/data/airports/EGKK/sids',
+    label: 'GET /data/airports/…/sids',
+  },
+  {
+    scopeId: 'data.airport_stars',
+    path: '/data/airports/EGKK/stars',
+    label: 'GET /data/airports/…/stars',
+  },
+  {
+    scopeId: 'data.airport_status',
+    path: '/data/airports/EGKK/status',
+    label: 'GET /data/airports/…/status',
+  },
+  {
+    scopeId: 'notifications.read',
+    path: '/notifications/active',
+    label: 'GET /notifications/active',
+  },
+  {
+    scopeId: 'flight_logs.read',
+    path: '/flight-logs',
+    label: 'GET /flight-logs',
+  },
+  {
+    scopeId: 'sessions.network_pfatc',
+    path: '/sessions/network/pfatc',
+    label: 'GET /sessions/network/pfatc',
+  },
+  {
+    scopeId: 'sessions.network_overview',
+    path: '/sessions/network/overview',
+    label: 'GET /sessions/network/overview',
+  },
+  // AATC disabled — infrastructure kept for future re-enablement
+  // {
+  //   scopeId: 'sessions.network_aatc',
+  //   path: '/sessions/network/aatc',
+  //   label: 'GET /sessions/network/aatc',
+  // },
+  { scopeId: 'sessions.list', path: '/sessions', label: 'GET /sessions' },
+  {
+    scopeId: 'sessions.read',
+    path: '/sessions/f0a35b5c',
+    label: 'GET /sessions/{id}',
+  },
+  {
+    scopeId: 'flights.list',
+    path: '/sessions/f0a2atac/flights',
+    label: 'GET /sessions/…/flights',
+  },
+  {
+    scopeId: 'flights.read',
+    path: '/sessions/f0a25uac/flights/da8dc2b5',
+    label: 'GET /sessions/…/flights/{id}',
+  },
+  {
+    scopeId: 'ratings.controller_stats',
+    path: '/ratings/controllers/1234567/stats',
+    label: 'GET /ratings/controllers/…/stats',
+  },
+];
+
+const SESSION_CREATE_BODY = JSON.stringify({
+  airportIcao: 'EGKK',
+  isPFATC: false,
+  isAdvancedATC: false,
+  activeRunway: '26L',
+});
+
+const FLIGHT_CREATE_BODY = JSON.stringify({
+  callsign: 'BAW123',
+  aircraft: 'A320',
+  flight_type: 'IFR',
+  departure: 'EGKK',
+  arrival: 'MDPC',
+});
+
+const FLIGHT_UPDATE_BODY = JSON.stringify({
+  status: 'ACTIVE',
+  runway: '26L',
+  squawk: '1234',
+});
+
+export type SampleCurlResult = {
+  command: string;
+  label: string;
+};
+
+export function buildSampleCurlForScopes(
+  secret: string,
+  apiExtBase: string,
+  scopes: string[]
+): SampleCurlResult {
+  const base = apiExtBase.replace(/\/$/, '');
+  const set = new Set(scopes);
+
+  for (const g of GET_SAMPLES) {
+    if (set.has(g.scopeId)) {
+      const url = `${base}${g.path}`;
+      return {
+        command: `curl -s -H "Authorization: Bearer ${secret}" "${url}"`,
+        label: g.label,
+      };
+    }
+  }
+
+  if (set.has('sessions.create')) {
+    return {
+      command: `curl -s -X POST -H "Authorization: Bearer ${secret}" -H "Content-Type: application/json" -d '${SESSION_CREATE_BODY}' "${base}/sessions"`,
+      label: 'POST /sessions',
+    };
+  }
+
+  if (set.has('flights.create')) {
+    return {
+      command: `curl -s -X POST -H "Authorization: Bearer ${secret}" -H "Content-Type: application/json" -d '${FLIGHT_CREATE_BODY}' "${base}/sessions/f0a25bac/flights"`,
+      label: 'POST /sessions/…/flights',
+    };
+  }
+
+  if (set.has('flights.update')) {
+    return {
+      command: `curl -s -X PUT -H "Authorization: Bearer ${secret}" -H "Content-Type: application/json" -d '${FLIGHT_UPDATE_BODY}' "${base}/sessions/f0a25bac/flights/da8dd215"`,
+      label: 'PUT /sessions/…/flights/{id}',
+    };
+  }
+
+  const url = `${base}/data/airports`;
+  return {
+    command: `curl -s -H "Authorization: Bearer ${secret}" "${url}"`,
+    label: 'GET /data/airports (fallback)',
+  };
+}

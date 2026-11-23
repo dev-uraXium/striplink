@@ -1,0 +1,852 @@
+import crypto from 'crypto';
+import { encrypt, decrypt, hashIp } from '../utils/encryption.js';
+import type { Settings } from './types/Settings.js';
+import { mainDb } from './connection.js';
+import { sql } from 'kysely';
+import { redisConnection } from './connection.js';
+import { incrementStat } from '../utils/statisticsCache.js';
+import { getUserRoles } from './roles.js';
+import {
+  containsProfanity,
+  containsBlacklistedBioLink,
+  getHateSpeechReason,
+} from '../utils/hateSpeechFilter.js';
+
+export async function invalidateUserCache(userId: string) {
+  try {
+    await redisConnection.del(`user:${userId}`);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn(
+        `[Redis] Failed to invalidate cache for user ${userId}:`,
+        error.message
+      );
+    } else {
+      console.warn(
+        `[Redis] Failed to invalidate cache for user ${userId}:`,
+        error
+      );
+    }
+  }
+}
+
+async function invalidateUsernameCache(username: string) {
+  try {
+    await redisConnection.del(`user:username:${username}`);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn(
+        `[Redis] Failed to invalidate username cache for ${username}:`,
+        error.message
+      );
+    } else {
+      console.warn(
+        `[Redis] Failed to invalidate username cache for ${username}:`,
+        error
+      );
+    }
+  }
+}
+
+export async function getUserById(userId: string) {
+  const cacheKey = `user:${userId}`;
+
+  let cached = null;
+  try {
+    cached = await redisConnection.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn('[Redis] Failed to read cache for user:', error.message);
+    }
+  }
+
+  if (cached) {
+    const user = JSON.parse(cached);
+    return user;
+  }
+
+  const user = await mainDb
+    .selectFrom('users')
+    .leftJoin('roles', 'users.role_id', 'roles.id')
+    .selectAll('users')
+    .select('roles.permissions as role_permissions')
+    .select('roles.name as role_name')
+    .where('users.id', '=', userId)
+    .executeTakeFirst();
+
+  if (!user) return null;
+
+  const userRoles = await getUserRoles(userId);
+  const mergedPermissions: Record<string, boolean> = {};
+  for (const role of userRoles) {
+    if (role.permissions) {
+      Object.assign(mergedPermissions, role.permissions);
+    }
+  }
+
+  if (Object.keys(mergedPermissions).length === 0 && user.role_permissions) {
+    Object.assign(mergedPermissions, user.role_permissions);
+  }
+
+  const safeDecrypt = (encryptedData: unknown, fieldName: string) => {
+    if (!encryptedData) return null;
+    try {
+      const parsed =
+        typeof encryptedData === 'string'
+          ? JSON.parse(encryptedData)
+          : encryptedData;
+      return decrypt(parsed);
+    } catch (error) {
+      console.error(
+        `Failed to decrypt ${fieldName} for user ${userId}:`,
+        error
+      );
+      return null;
+    }
+  };
+
+  const result = {
+    ...user,
+    access_token: safeDecrypt(user.access_token, 'access_token'),
+    refresh_token: safeDecrypt(user.refresh_token, 'refresh_token'),
+    settings: user.settings
+      ? (() => {
+          try {
+            const settingsObj =
+              typeof user.settings === 'string'
+                ? JSON.parse(user.settings)
+                : user.settings;
+            return decrypt(settingsObj);
+          } catch {
+            return null;
+          }
+        })()
+      : null,
+    ip_address: safeDecrypt(user.ip_address, 'ip_address'),
+    role_permissions: mergedPermissions,
+    statistics: user.statistics || {},
+  };
+
+  try {
+    await redisConnection.set(cacheKey, JSON.stringify(result), 'EX', 86400);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn('[Redis] Failed to set cache for user:', error.message);
+    }
+  }
+
+  return result;
+}
+
+export async function getUserByUsername(username: string) {
+  const cacheKey = `user:username:${username}`;
+
+  let cached = null;
+  try {
+    cached = await redisConnection.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn(
+        `[Redis] Failed to read cache for username ${username}:`,
+        error.message
+      );
+    } else {
+      console.warn(
+        `[Redis] Failed to read cache for username ${username}:`,
+        error
+      );
+    }
+  }
+
+  if (cached) {
+    const user = JSON.parse(cached);
+    return user;
+  }
+
+  const user = await mainDb
+    .selectFrom('users')
+    .leftJoin('roles', 'users.role_id', 'roles.id')
+    .selectAll('users')
+    .select('roles.permissions as role_permissions')
+    .where('users.username', '=', username)
+    .executeTakeFirst();
+
+  if (!user) return null;
+
+  const result = {
+    ...user,
+    access_token: user.access_token
+      ? decrypt(
+          typeof user.access_token === 'string'
+            ? JSON.parse(user.access_token)
+            : user.access_token
+        )
+      : null,
+    refresh_token: user.refresh_token
+      ? decrypt(
+          typeof user.refresh_token === 'string'
+            ? JSON.parse(user.refresh_token)
+            : user.refresh_token
+        )
+      : null,
+    settings: user.settings
+      ? decrypt(
+          typeof user.settings === 'string'
+            ? JSON.parse(user.settings)
+            : user.settings
+        )
+      : null,
+    ip_address: user.ip_address
+      ? decrypt(
+          typeof user.ip_address === 'string'
+            ? JSON.parse(user.ip_address)
+            : user.ip_address
+        )
+      : null,
+    role_permissions: user.role_permissions || null,
+    statistics: user.statistics || {},
+  };
+
+  try {
+    await redisConnection.set(cacheKey, JSON.stringify(result), 'EX', 60 * 30);
+  } catch (error) {
+    if (error instanceof Error) {
+      console.warn(
+        `[Redis] Failed to set cache for username ${username}:`,
+        error.message
+      );
+    } else {
+      console.warn(
+        `[Redis] Failed to set cache for username ${username}:`,
+        error
+      );
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Appends (or bumps, if already present) an entry in the user's append-only
+ * IP history. Done as a single atomic UPDATE rather than read-modify-write in
+ * JS so concurrent logins for the same user can't race and drop an entry.
+ */
+export async function appendIpHistoryEntry(
+  userId: string,
+  ipAddress: string,
+  isVpn: boolean
+) {
+  const hash = hashIp(ipAddress);
+  const encryptedIp = encrypt(ipAddress);
+
+  await sql`
+    UPDATE users
+    SET ip_history = (
+      CASE
+        WHEN EXISTS (
+          SELECT 1 FROM jsonb_array_elements(ip_history) e WHERE e->>'hash' = ${hash}
+        )
+        THEN COALESCE((
+          SELECT jsonb_agg(
+            CASE
+              WHEN e->>'hash' = ${hash}
+              THEN e
+                || jsonb_build_object('last_seen', now())
+                || jsonb_build_object('seen_count', COALESCE((e->>'seen_count')::int, 0) + 1)
+                || jsonb_build_object('is_vpn', ${isVpn}::boolean)
+              ELSE e
+            END
+            ORDER BY ord
+          )
+          FROM jsonb_array_elements(ip_history) WITH ORDINALITY AS t(e, ord)
+        ), '[]'::jsonb)
+        ELSE ip_history || jsonb_build_array(
+          jsonb_build_object(
+            'hash', ${hash}::text,
+            'ip', ${JSON.stringify(encryptedIp)}::jsonb,
+            'is_vpn', ${isVpn}::boolean,
+            'first_seen', now(),
+            'last_seen', now(),
+            'seen_count', 1
+          )
+        )
+      END
+    )
+    WHERE id = ${userId}
+  `.execute(mainDb);
+}
+
+/**
+ * Same append-only pattern as appendIpHistoryEntry, for browser fingerprints.
+ */
+export async function appendFingerprintHistoryEntry(
+  userId: string,
+  fingerprintId: string
+) {
+  await sql`
+    UPDATE users
+    SET fingerprint_history = (
+      CASE
+        WHEN EXISTS (
+          SELECT 1 FROM jsonb_array_elements(fingerprint_history) e WHERE e->>'fingerprint_id' = ${fingerprintId}
+        )
+        THEN COALESCE((
+          SELECT jsonb_agg(
+            CASE
+              WHEN e->>'fingerprint_id' = ${fingerprintId}
+              THEN e
+                || jsonb_build_object('last_seen', now())
+                || jsonb_build_object('seen_count', COALESCE((e->>'seen_count')::int, 0) + 1)
+              ELSE e
+            END
+            ORDER BY ord
+          )
+          FROM jsonb_array_elements(fingerprint_history) WITH ORDINALITY AS t(e, ord)
+        ), '[]'::jsonb)
+        ELSE fingerprint_history || jsonb_build_array(
+          jsonb_build_object(
+            'fingerprint_id', ${fingerprintId}::text,
+            'first_seen', now(),
+            'last_seen', now(),
+            'seen_count', 1
+          )
+        )
+      END
+    )
+    WHERE id = ${userId}
+  `.execute(mainDb);
+}
+
+export async function createOrUpdateUser(userData: {
+  id: string;
+  username: string;
+  discriminator?: string;
+  avatar?: string;
+  accessToken: string;
+  refreshToken: string;
+  ipAddress: string;
+  isVpn?: boolean;
+}) {
+  const {
+    id,
+    username,
+    discriminator = '0',
+    avatar,
+    accessToken,
+    refreshToken,
+    ipAddress,
+    isVpn = false,
+  } = userData;
+
+  const defaultSettings = {
+    sounds: {
+      startupSound: { enabled: true, volume: 100 },
+      chatNotificationSound: { enabled: true, volume: 100 },
+      newStripSound: { enabled: true, volume: 100 },
+      acarsBeep: { enabled: true, volume: 100 },
+      acarsChatPop: { enabled: true, volume: 100 },
+    },
+    backgroundImage: {
+      selectedImage: null,
+      useCustomBackground: false,
+      favorites: [],
+    },
+    layout: {
+      showCombinedView: false,
+      flightRowOpacity: 100,
+      chartDrawerViewMode: 'legacy' as const,
+    },
+    departureTableColumns: {
+      time: true as const,
+      callsign: true,
+      stand: true,
+      aircraft: true,
+      wakeTurbulence: true,
+      flightType: true,
+      arrival: true,
+      runway: true,
+      sid: true,
+      rfl: true,
+      cfl: true,
+      squawk: true,
+      clearance: true,
+      status: true,
+      remark: true,
+      route: true,
+      pdc: true,
+      hide: true,
+      delete: true,
+    },
+    arrivalsTableColumns: {
+      time: true as const,
+      callsign: true,
+      gate: true,
+      aircraft: true,
+      wakeTurbulence: true,
+      flightType: true,
+      departure: true,
+      runway: true,
+      star: true,
+      rfl: true,
+      cfl: true,
+      squawk: true,
+      status: true,
+      remark: true,
+      route: true,
+      hide: true,
+    },
+    acars: {
+      notesEnabled: true,
+      chartsEnabled: true,
+      autoRedirectToAcars: true,
+      sidebarWidth: 30,
+      terminalWidth: 50,
+      notesWidth: 20,
+    },
+    tutorialCompleted: false,
+    displayStatsOnProfile: true,
+    displayControllerRatingOnProfile: true,
+    displayLinkedAccountsOnProfile: true,
+    hideFromLeaderboard: false,
+    displayBackgroundOnProfile: true,
+    displayBioOnProfile: true,
+    bio: '',
+    profileCustomization: {
+      accentColor: null,
+      backgroundColor: null,
+      cardColor: null,
+      bannerTintColor: null,
+      bannerTintOpacity: 0,
+      hiddenRoleIds: [],
+      hiddenStatIds: [],
+      sectionOrder: [],
+    },
+  };
+
+  const encryptedAccessToken = encrypt(accessToken);
+  const encryptedRefreshToken = encrypt(refreshToken);
+  const encryptedIP = encrypt(ipAddress);
+  const encryptedSettings = encrypt(defaultSettings);
+  const ipHash = ipAddress ? hashIp(ipAddress) : null;
+
+  await mainDb
+    .insertInto('users')
+    .values({
+      id,
+      username,
+      discriminator,
+      avatar,
+      access_token: JSON.stringify(encryptedAccessToken),
+      refresh_token: JSON.stringify(encryptedRefreshToken),
+      ip_address: JSON.stringify(encryptedIP),
+      ip_hash: ipHash,
+      is_vpn: isVpn,
+      settings: JSON.stringify(encryptedSettings),
+      last_login: sql`NOW()`,
+      updated_at: sql`NOW()`,
+      created_at: sql`NOW()`,
+    })
+    .onConflict((oc) =>
+      oc.column('id').doUpdateSet({
+        username,
+        discriminator,
+        avatar,
+        access_token: JSON.stringify(encryptedAccessToken),
+        refresh_token: JSON.stringify(encryptedRefreshToken),
+        last_login: sql`NOW()`,
+        ip_address: JSON.stringify(encryptedIP),
+        ip_hash: ipHash,
+        is_vpn: isVpn,
+        updated_at: sql`NOW()`,
+      })
+    )
+    .execute();
+
+  if (ipAddress) {
+    await appendIpHistoryEntry(id, ipAddress, isVpn);
+  }
+
+  await invalidateUserCache(id);
+  return await getUserById(id);
+}
+
+export async function updateUserSettings(
+  id: string,
+  settings: Partial<Settings>
+) {
+  const existingUser = await getUserById(id);
+  if (!existingUser) {
+    throw new Error('User not found');
+  }
+
+  const mergedSettings = { ...existingUser.settings, ...settings };
+  const encryptedSettings = encrypt(mergedSettings);
+
+  const updateValues: Record<string, unknown> = {
+    settings: JSON.stringify(encryptedSettings),
+    settings_updated_at: sql`NOW()`,
+    updated_at: sql`NOW()`,
+  };
+
+  if ('bio' in settings && settings.bio !== existingUser.settings?.bio) {
+    const trimmedBio = settings.bio?.trim() || null;
+    const hasBlacklistedLink = trimmedBio
+      ? containsBlacklistedBioLink(trimmedBio)
+      : false;
+    const automodFlagged = trimmedBio
+      ? containsProfanity(trimmedBio) || hasBlacklistedLink
+      : false;
+    updateValues.bio_automod_flagged = automodFlagged;
+    updateValues.bio_automod_reason = automodFlagged
+      ? hasBlacklistedLink
+        ? 'Blacklisted link detected'
+        : getHateSpeechReason(trimmedBio!)
+      : null;
+  }
+
+  await mainDb
+    .updateTable('users')
+    .set(updateValues)
+    .where('id', '=', id)
+    .execute();
+
+  await invalidateUserCache(id);
+  await invalidateUsernameCache(existingUser.username);
+  return await getUserById(id);
+}
+
+export async function adminClearUserBio(userId: string) {
+  return updateUserSettings(userId, { bio: '' });
+}
+
+export async function getUsersWithProfileContentForAdmin() {
+  const rows = await mainDb
+    .selectFrom('users')
+    .select([
+      'id',
+      'username',
+      'avatar',
+      'settings',
+      'bio_automod_flagged',
+      'bio_automod_reason',
+    ])
+    .execute();
+
+  const results: Array<{
+    userId: string;
+    username: string;
+    avatar: string | null;
+    bio: string;
+    bioAutomodFlagged: boolean;
+    bioAutomodReason: string | null;
+  }> = [];
+
+  for (const row of rows) {
+    let settings: Settings | null = null;
+    try {
+      const raw =
+        typeof row.settings === 'string'
+          ? JSON.parse(row.settings)
+          : row.settings;
+      settings = raw ? decrypt(raw) : null;
+    } catch {
+      continue;
+    }
+
+    const bio = (settings?.bio ?? '').trim();
+    if (!bio) continue;
+
+    results.push({
+      userId: row.id,
+      username: row.username,
+      avatar: row.avatar ?? null,
+      bio,
+      bioAutomodFlagged: Boolean(row.bio_automod_flagged),
+      bioAutomodReason: row.bio_automod_reason ?? null,
+    });
+  }
+
+  return results;
+}
+
+export async function addSessionToUser(
+  userId: string,
+  _sessionId: string,
+  options?: { countTowardStats?: boolean }
+) {
+  await mainDb
+    .updateTable('users')
+    .set({
+      last_session_created: sql`NOW()`,
+      total_sessions_created: sql`total_sessions_created + 1`,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  if (options?.countTowardStats ?? true) {
+    incrementStat(userId, 'total_sessions_created');
+  }
+  await invalidateUserCache(userId);
+  return await getUserById(userId);
+}
+
+export async function removeSessionFromUser(
+  userId: string,
+  _sessionId: string
+) {
+  await mainDb
+    .updateTable('users')
+    .set({
+      last_session_deleted: sql`NOW()`,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  return await getUserById(userId);
+}
+
+export async function updateRobloxAccount(
+  userId: string,
+  {
+    robloxUserId,
+    robloxUsername,
+    accessToken,
+    refreshToken,
+  }: {
+    robloxUserId: string;
+    robloxUsername: string;
+    accessToken: string;
+    refreshToken: string;
+  }
+) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      roblox_user_id: robloxUserId,
+      roblox_username: robloxUsername,
+      roblox_access_token: accessToken,
+      roblox_refresh_token: refreshToken,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+  return await getUserById(userId);
+}
+
+export async function unlinkRobloxAccount(userId: string) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      roblox_user_id: null,
+      roblox_username: null,
+      roblox_access_token: null,
+      roblox_refresh_token: null,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+  return await getUserById(userId);
+}
+
+export async function updateVatsimAccount(
+  userId: string,
+  {
+    vatsimCid,
+    ratingId,
+    ratingShort,
+    ratingLong,
+  }: {
+    vatsimCid: string;
+    ratingId: number;
+    ratingShort?: string;
+    ratingLong?: string;
+  }
+) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      vatsim_cid: vatsimCid,
+      vatsim_rating_id: ratingId,
+      vatsim_rating_short: ratingShort ?? undefined,
+      vatsim_rating_long: ratingLong ?? undefined,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+  return await getUserById(userId);
+}
+
+export async function unlinkVatsimAccount(userId: string) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      vatsim_cid: null,
+      vatsim_rating_id: null,
+      vatsim_rating_short: null,
+      vatsim_rating_long: null,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+  return await getUserById(userId);
+}
+
+export async function updateTutorialStatus(id: string, completed: boolean) {
+  const existingUser = await getUserById(id);
+  if (!existingUser) throw new Error('User not found');
+
+  const mergedSettings = {
+    ...existingUser.settings,
+    tutorialCompleted: completed,
+  };
+  const encryptedSettings = encrypt(mergedSettings);
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      settings: JSON.stringify(encryptedSettings),
+      settings_updated_at: sql`NOW()`,
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', id)
+    .execute();
+
+  await invalidateUserCache(id);
+  await invalidateUsernameCache(existingUser.username);
+  return await getUserById(id);
+}
+
+export async function updateUserStatistics(
+  userId: string,
+  stats: Record<string, unknown>
+) {
+  const existingUser = await getUserById(userId);
+  if (!existingUser) throw new Error('User not found');
+
+  const existingStats = (existingUser.statistics ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const mergedStats: Record<string, unknown> = {
+    ...existingStats,
+    ...stats,
+    last_updated: new Date().toISOString(),
+  };
+
+  await mainDb
+    .updateTable('users')
+    .set({
+      statistics: JSON.stringify(mergedStats),
+      updated_at: sql`NOW()`,
+    })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+}
+
+export async function updateUserFingerprint(
+  userId: string,
+  fingerprintId: string
+) {
+  await mainDb
+    .updateTable('users')
+    .set({ fingerprint_id: fingerprintId, updated_at: sql`NOW()` })
+    .where('id', '=', userId)
+    .execute();
+
+  await appendFingerprintHistoryEntry(userId, fingerprintId);
+
+  await invalidateUserCache(userId);
+}
+
+export async function setUserVpnFlag(userId: string, isVpn: boolean) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb
+    .updateTable('users')
+    .set({ is_vpn: isVpn, updated_at: sql`NOW()` })
+    .where('id', '=', userId)
+    .execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+}
+
+export async function ensureUserPlatformToken(userId: string): Promise<string> {
+  const candidate = crypto.randomBytes(32).toString('hex');
+
+  const result = await sql<{ platform_token: string }>`
+    UPDATE users
+    SET platform_token = COALESCE(platform_token, ${candidate})
+    WHERE id = ${userId}
+    RETURNING platform_token
+  `.execute(mainDb);
+
+  const token = result.rows[0]?.platform_token;
+  if (!token) {
+    throw new Error('Failed to assign platform token');
+  }
+
+  await invalidateUserCache(userId);
+  return token;
+}
+
+/**
+ * Lean lookup for the platform-identity endpoint — deliberately not the
+ * full-fat getUserById pattern (no cache, no decrypt, no joins), since this
+ * only ever needs to answer "who is this."
+ */
+export async function getUserByPlatformToken(token: string) {
+  return mainDb
+    .selectFrom('users')
+    .select(['id', 'username', 'discriminator', 'avatar'])
+    .where('platform_token', '=', token)
+    .executeTakeFirst();
+}
+
+export async function deleteUser(userId: string) {
+  const user = await getUserById(userId);
+  if (!user) throw new Error('User not found');
+
+  await mainDb.deleteFrom('users').where('id', '=', userId).execute();
+
+  await invalidateUserCache(userId);
+  await invalidateUsernameCache(user.username);
+
+  return true;
+}

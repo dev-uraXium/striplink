@@ -1,0 +1,1502 @@
+import { sql } from 'kysely';
+import { mainDb } from './connection.js';
+import type Redis from 'ioredis';
+import { DEPLOYMENT, prefixKey } from '../utils/cacheTtl.js';
+import { SEED_SURVEYS } from '../surveys/definitions.js';
+
+export async function createMainTables() {
+  // app_settings
+  await mainDb.schema
+    .createTable('app_settings')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('version', 'varchar(50)', (col) => col.notNull())
+    .addColumn('updated_at', 'timestamptz', (col) => col.notNull())
+    .addColumn('updated_by', 'varchar(255)', (col) => col.notNull())
+    .addColumn('channel', 'varchar(50)', (col) =>
+      col.notNull().defaultTo('production')
+    )
+    .execute();
+
+  // roles (must be created before users)
+  await mainDb.schema
+    .createTable('roles')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('name', 'varchar(255)', (col) => col.unique().notNull())
+    .addColumn('description', 'text')
+    .addColumn('permissions', 'jsonb', (col) => col.notNull())
+    .addColumn('color', 'varchar(50)')
+    .addColumn('icon', 'varchar(255)')
+    .addColumn('priority', 'integer')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // users
+  await mainDb.schema
+    .createTable('users')
+    .ifNotExists()
+    .addColumn('id', 'varchar(255)', (col) => col.primaryKey())
+    .addColumn('username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('discriminator', 'varchar(10)')
+    .addColumn('avatar', 'text')
+    .addColumn('access_token', 'text')
+    .addColumn('refresh_token', 'text')
+    .addColumn('last_login', 'timestamptz')
+    .addColumn('ip_address', 'text')
+    .addColumn('is_vpn', 'boolean')
+    .addColumn('last_session_created', 'timestamptz')
+    .addColumn('last_session_deleted', 'timestamptz')
+    .addColumn('settings', 'jsonb')
+    .addColumn('settings_updated_at', 'timestamptz')
+    .addColumn('total_sessions_created', 'integer', (col) => col.defaultTo(0))
+    .addColumn('total_minutes', 'integer', (col) => col.defaultTo(0))
+    .addColumn('vatsim_cid', 'varchar(50)')
+    .addColumn('vatsim_rating_id', 'integer')
+    .addColumn('vatsim_rating_short', 'varchar(10)')
+    .addColumn('vatsim_rating_long', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('roblox_user_id', 'varchar(255)')
+    .addColumn('roblox_username', 'varchar(255)')
+    .addColumn('roblox_access_token', 'text')
+    .addColumn('roblox_refresh_token', 'text')
+    .addColumn('role_id', 'integer', (col) =>
+      col.references('roles.id').onDelete('set null')
+    )
+    .addColumn('tutorial_completed', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('statistics', 'jsonb')
+    .addColumn('fingerprint_id', 'varchar(255)')
+    .addColumn('ip_hash', 'varchar(64)')
+    .addColumn('ip_history', 'jsonb', (col) => col.notNull().defaultTo('[]'))
+    .addColumn('fingerprint_history', 'jsonb', (col) =>
+      col.notNull().defaultTo('[]')
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_users_fingerprint_id')
+    .ifNotExists()
+    .on('users')
+    .column('fingerprint_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_users_ip_hash')
+    .ifNotExists()
+    .on('users')
+    .column('ip_hash')
+    .execute();
+
+  // sessions
+  await mainDb.schema
+    .createTable('sessions')
+    .ifNotExists()
+    .addColumn('session_id', 'varchar(255)', (col) => col.primaryKey())
+    .addColumn('access_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('active_runway', 'varchar(10)')
+    .addColumn('airport_icao', 'varchar(10)', (col) => col.notNull())
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('created_by', 'varchar(255)', (col) =>
+      col.notNull().references('users.id').onDelete('cascade')
+    )
+    .addColumn('is_pfatc', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('is_advanced_atc', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('flight_strips', 'jsonb')
+    .addColumn('atis', 'jsonb')
+    .addColumn('custom_name', 'varchar(255)')
+    .addColumn('refreshed_at', 'timestamptz')
+    .addCheckConstraint(
+      'sessions_pfatc_advanced_exclusive',
+      sql`NOT (is_pfatc AND is_advanced_atc)`
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_sessions_created_by')
+    .ifNotExists()
+    .on('sessions')
+    .column('created_by')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_sessions_airport_icao')
+    .ifNotExists()
+    .on('sessions')
+    .column('airport_icao')
+    .execute();
+
+  // user_roles
+  await mainDb.schema
+    .createTable('user_roles')
+    .ifNotExists()
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.references('users.id').onDelete('cascade')
+    )
+    .addColumn('role_id', 'integer', (col) =>
+      col.references('roles.id').onDelete('cascade')
+    )
+    .addColumn('assigned_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addPrimaryKeyConstraint('user_roles_pkey', ['user_id', 'role_id'])
+    .execute();
+
+  // audit_log
+  await mainDb.schema
+    .createTable('audit_log')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('admin_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('admin_username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('action_type', 'varchar(100)', (col) => col.notNull())
+    .addColumn('target_user_id', 'varchar(255)')
+    .addColumn('target_username', 'varchar(255)')
+    .addColumn('details', 'jsonb')
+    .addColumn('ip_address', 'text')
+    .addColumn('user_agent', 'text')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_audit_log_created_at')
+    .ifNotExists()
+    .on('audit_log')
+    .column('created_at')
+    .execute();
+
+  // bans
+  await mainDb.schema
+    .createTable('bans')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)')
+    .addColumn('ip_address', 'text')
+    .addColumn('username', 'varchar(255)')
+    .addColumn('reason', 'text')
+    .addColumn('banned_by', 'varchar(255)', (col) => col.notNull())
+    .addColumn('banned_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('expires_at', 'timestamptz')
+    .addColumn('active', 'boolean', (col) => col.defaultTo(true))
+    .addColumn('fingerprint_id', 'varchar(255)')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_bans_user_id')
+    .ifNotExists()
+    .on('bans')
+    .column('user_id')
+    .execute();
+
+  // notifications
+  await mainDb.schema
+    .createTable('notifications')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('type', 'varchar(50)', (col) => col.notNull())
+    .addColumn('text', 'text', (col) => col.notNull())
+    .addColumn('show', 'boolean', (col) => col.defaultTo(true))
+    .addColumn('custom_color', 'varchar(50)')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // user_notifications
+  await mainDb.schema
+    .createTable('user_notifications')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.references('users.id').onDelete('cascade').notNull()
+    )
+    .addColumn('type', 'varchar(50)', (col) => col.notNull())
+    .addColumn('title', 'varchar(255)', (col) => col.notNull())
+    .addColumn('message', 'text', (col) => col.notNull())
+    .addColumn('read', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_user_notif_user_id')
+    .ifNotExists()
+    .on('user_notifications')
+    .column('user_id')
+    .execute();
+
+  // surveys
+  await mainDb.schema
+    .createTable('surveys')
+    .ifNotExists()
+    .addColumn('id', 'varchar(64)', (col) => col.primaryKey())
+    .addColumn('title', 'varchar(120)', (col) => col.notNull())
+    .addColumn('description', 'text', (col) => col.notNull().defaultTo(''))
+    .addColumn('questions', 'jsonb', (col) => col.notNull())
+    .addColumn('active', 'boolean', (col) => col.notNull().defaultTo(false))
+    .addColumn('created_by', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  // At most one survey can be active.
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_surveys_single_active
+    ON surveys (active) WHERE active
+  `.execute(mainDb);
+
+  // survey_responses
+  await mainDb.schema
+    .createTable('survey_responses')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('survey_id', 'varchar(64)', (col) => col.notNull())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.references('users.id').onDelete('cascade').notNull()
+    )
+    .addColumn('answers', 'jsonb', (col) => col.notNull())
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addUniqueConstraint('survey_responses_survey_user_unique', [
+      'survey_id',
+      'user_id',
+    ])
+    .execute();
+
+  // testers
+  await mainDb.schema
+    .createTable('testers')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.references('users.id').onDelete('cascade').unique().notNull()
+    )
+    .addColumn('username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('added_by', 'varchar(255)', (col) => col.notNull())
+    .addColumn('added_by_username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('notes', 'text')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // tester_settings
+  await mainDb.schema
+    .createTable('tester_settings')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('setting_key', 'varchar(255)', (col) => col.unique().notNull())
+    .addColumn('setting_value', 'boolean', (col) => col.notNull())
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // daily_statistics
+  await mainDb.schema
+    .createTable('daily_statistics')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('date', 'date', (col) => col.notNull().unique())
+    .addColumn('logins_count', 'integer', (col) => col.defaultTo(0))
+    .addColumn('new_sessions_count', 'integer', (col) => col.defaultTo(0))
+    .addColumn('new_flights_count', 'integer', (col) => col.defaultTo(0))
+    .addColumn('new_users_count', 'integer', (col) => col.defaultTo(0))
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // chat_report
+  await mainDb.schema
+    .createTable('chat_report')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('session_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('message_id', 'integer', (col) => col.notNull())
+    .addColumn('reporter_user_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('reporter_username', 'varchar(255)')
+    .addColumn('reported_user_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('reported_username', 'varchar(255)')
+    .addColumn('reported_avatar', 'varchar(255)')
+    .addColumn('reporter_avatar', 'varchar(255)')
+    .addColumn('message', 'text', (col) => col.notNull())
+    .addColumn('reason', 'text', (col) => col.notNull())
+    .addColumn('status', 'varchar(50)', (col) => col.defaultTo('pending'))
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_chat_report_status')
+    .ifNotExists()
+    .on('chat_report')
+    .column('status')
+    .execute();
+
+  // update_modals
+  await mainDb.schema
+    .createTable('update_modals')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('title', 'varchar(255)', (col) => col.notNull())
+    .addColumn('content', 'text', (col) => col.notNull())
+    .addColumn('banner_url', 'text')
+    .addColumn('is_active', 'boolean', (col) => col.defaultTo(false).notNull())
+    .addColumn('published_at', 'timestamptz')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // flight_logs
+  await mainDb.schema
+    .createTable('flight_logs')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('session_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('action', 'varchar(50)', (col) => col.notNull())
+    .addColumn('flight_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('old_data', 'jsonb')
+    .addColumn('new_data', 'jsonb')
+    .addColumn('ip_address', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_flight_logs_session_id')
+    .ifNotExists()
+    .on('flight_logs')
+    .column('session_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_flight_logs_created_at')
+    .ifNotExists()
+    .on('flight_logs')
+    .column('created_at')
+    .execute();
+
+  // feedback
+  await mainDb.schema
+    .createTable('feedback')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('rating', 'integer', (col) => col.notNull())
+    .addColumn('comment', 'text')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // api_logs
+  await mainDb.schema
+    .createTable('api_logs')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)')
+    .addColumn('username', 'varchar(255)')
+    .addColumn('method', 'varchar(10)', (col) => col.notNull())
+    .addColumn('path', 'text', (col) => col.notNull())
+    .addColumn('status_code', 'integer', (col) => col.notNull())
+    .addColumn('response_time', 'integer', (col) => col.notNull())
+    .addColumn('ip_address', 'text', (col) => col.notNull())
+    .addColumn('user_agent', 'text')
+    .addColumn('request_body', 'text')
+    .addColumn('response_body', 'text')
+    .addColumn('error_message', 'text')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_api_logs_created_at')
+    .ifNotExists()
+    .on('api_logs')
+    .column('created_at')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_api_logs_user_id')
+    .ifNotExists()
+    .on('api_logs')
+    .column('user_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('api_logs_path_idx')
+    .ifNotExists()
+    .on('api_logs')
+    .column('path')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('api_logs_status_code_idx')
+    .ifNotExists()
+    .on('api_logs')
+    .column('status_code')
+    .execute();
+
+  // controller_ratings
+  await mainDb.schema
+    .createTable('controller_ratings')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('controller_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('pilot_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('rating', 'integer', (col) => col.notNull())
+    .addColumn('flight_id', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_ctrl_ratings_controller')
+    .ifNotExists()
+    .on('controller_ratings')
+    .column('controller_id')
+    .execute();
+
+  await mainDb.schema
+    .createTable('flights')
+    .ifNotExists()
+    .addColumn('id', 'varchar(36)', (col) => col.primaryKey())
+    .addColumn('session_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('user_id', 'varchar(36)')
+    .addColumn('ip_address', 'varchar(45)')
+    .addColumn('callsign', 'varchar(16)')
+    .addColumn('aircraft', 'varchar(16)')
+    .addColumn('flight_type', 'varchar(16)')
+    .addColumn('departure', 'varchar(4)')
+    .addColumn('arrival', 'varchar(4)')
+    .addColumn('alternate', 'varchar(4)')
+    .addColumn('route', 'text')
+    .addColumn('sid', 'varchar(16)')
+    .addColumn('star', 'varchar(16)')
+    .addColumn('runway', 'varchar(10)')
+    .addColumn('clearedfl', 'varchar(8)')
+    .addColumn('cruisingfl', 'varchar(8)')
+    .addColumn('stand', 'varchar(8)')
+    .addColumn('gate', 'varchar(8)')
+    .addColumn('remark', 'text')
+    .addColumn('flight_plan_time', 'varchar(32)')
+    .addColumn('status', 'varchar(16)')
+    .addColumn('clearance', 'text')
+    .addColumn('position', 'jsonb')
+    .addColumn('squawk', 'varchar(8)')
+    .addColumn('wtc', 'varchar(4)')
+    .addColumn('hidden', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('acars_token', 'varchar(64)')
+    .addColumn('pdc_remarks', 'text')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('notes', 'text')
+    .addColumn('snap_images', 'jsonb')
+    .addColumn('featured_on_profile', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('req_at', 'timestamptz')
+    .addColumn('req_phase', 'varchar(4)')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_flights_session_id')
+    .ifNotExists()
+    .on('flights')
+    .column('session_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_flights_callsign')
+    .ifNotExists()
+    .on('flights')
+    .column('callsign')
+    .execute();
+
+  await mainDb.schema
+    .createTable('session_chat')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('session_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('user_id', 'varchar(36)', (col) => col.notNull())
+    .addColumn('username', 'varchar(255)')
+    .addColumn('avatar', 'varchar(255)')
+    .addColumn('message', 'text', (col) => col.notNull())
+    .addColumn('mentions', 'jsonb')
+    .addColumn('sent_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_session_chat_session_sent')
+    .ifNotExists()
+    .on('session_chat')
+    .columns(['session_id', 'sent_at'])
+    .execute();
+
+  await mainDb.schema
+    .createTable('pilot_chat')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('session_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('flight_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('sender', 'varchar(10)', (col) => col.notNull())
+    .addColumn('user_id', 'varchar(36)', (col) => col.notNull())
+    .addColumn('username', 'varchar(255)')
+    .addColumn('avatar', 'varchar(255)')
+    .addColumn('station', 'varchar(32)')
+    .addColumn('callsign', 'varchar(16)')
+    .addColumn('message', 'text', (col) => col.notNull())
+    .addColumn('blocked', 'boolean', (col) => col.defaultTo(false))
+    .addColumn('sent_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_pilot_chat_session_flight_sent')
+    .ifNotExists()
+    .on('pilot_chat')
+    .columns(['session_id', 'flight_id', 'sent_at'])
+    .execute();
+
+  await mainDb.schema
+    .createTable('global_chat')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) => col.notNull())
+    .addColumn('username', 'varchar(255)')
+    .addColumn('avatar', 'varchar(255)')
+    .addColumn('station', 'varchar(50)')
+    .addColumn('position', 'varchar(50)')
+    .addColumn('message', 'jsonb', (col) => col.notNull())
+    .addColumn('airport_mentions', 'jsonb')
+    .addColumn('user_mentions', 'jsonb')
+    .addColumn('sent_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('deleted_at', 'timestamptz')
+    .addColumn('network_kind', 'varchar(20)', (col) =>
+      col.defaultTo('pfatc').notNull()
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('global_chat_sent_at_idx')
+    .ifNotExists()
+    .on('global_chat')
+    .column('sent_at')
+    .execute();
+
+  // vpn_exceptions
+  await mainDb.schema
+    .createTable('vpn_exceptions')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.references('users.id').onDelete('cascade').unique().notNull()
+    )
+    .addColumn('username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('added_by', 'varchar(255)', (col) => col.notNull())
+    .addColumn('added_by_username', 'varchar(255)', (col) => col.notNull())
+    .addColumn('notes', 'text')
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // vpn_gate_settings
+  await mainDb.schema
+    .createTable('vpn_gate_settings')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('setting_key', 'varchar(255)', (col) => col.unique().notNull())
+    .addColumn('setting_value', 'boolean', (col) => col.notNull())
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  // developer_applications
+  await mainDb.schema
+    .createTable('developer_applications')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.notNull().references('users.id').onDelete('cascade')
+    )
+    .addColumn('who_text', 'text', (col) => col.notNull())
+    .addColumn('why_text', 'text', (col) => col.notNull())
+    .addColumn('requested_scopes', 'jsonb', (col) => col.notNull())
+    .addColumn('status', 'varchar(32)', (col) =>
+      col.notNull().defaultTo('pending')
+    )
+    .addColumn('reviewed_by', 'varchar(255)')
+    .addColumn('reviewed_at', 'timestamptz')
+    .addColumn('reviewer_note', 'text')
+    .addColumn('approved_scopes', 'jsonb')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_applications_user_id')
+    .ifNotExists()
+    .on('developer_applications')
+    .column('user_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_applications_status')
+    .ifNotExists()
+    .on('developer_applications')
+    .column('status')
+    .execute();
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_developer_applications_one_pending
+    ON developer_applications (user_id)
+    WHERE status = 'pending'
+  `.execute(mainDb);
+
+  // developer_profiles
+  await mainDb.schema
+    .createTable('developer_profiles')
+    .ifNotExists()
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.primaryKey().references('users.id').onDelete('cascade')
+    )
+    .addColumn('approved_scopes', 'jsonb', (col) => col.notNull())
+    .addColumn('status', 'varchar(32)', (col) =>
+      col.notNull().defaultTo('active')
+    )
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  // developer_api_keys
+  await mainDb.schema
+    .createTable('developer_api_keys')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.notNull().references('users.id').onDelete('cascade')
+    )
+    .addColumn('name', 'varchar(255)', (col) => col.notNull())
+    .addColumn('prefix', 'varchar(64)', (col) => col.notNull())
+    .addColumn('secret_hash', 'varchar(64)', (col) => col.notNull())
+    .addColumn('scopes', 'jsonb', (col) => col.notNull())
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('last_used_at', 'timestamptz')
+    .addColumn('revoked_at', 'timestamptz')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_api_keys_user_id')
+    .ifNotExists()
+    .on('developer_api_keys')
+    .column('user_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_api_keys_secret_hash')
+    .ifNotExists()
+    .on('developer_api_keys')
+    .column('secret_hash')
+    .execute();
+
+  // developer_api_usage
+  await mainDb.schema
+    .createTable('developer_api_usage')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('key_id', 'bigint', (col) =>
+      col.notNull().references('developer_api_keys.id').onDelete('cascade')
+    )
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.notNull().references('users.id').onDelete('cascade')
+    )
+    .addColumn('scope_id', 'varchar(128)', (col) => col.notNull())
+    .addColumn('method', 'varchar(10)', (col) => col.notNull())
+    .addColumn('path', 'text', (col) => col.notNull())
+    .addColumn('status_code', 'integer', (col) => col.notNull())
+    .addColumn('duration_ms', 'integer', (col) => col.notNull())
+    .addColumn('ip_hash', 'varchar(64)')
+    .addColumn('client_ip', 'varchar(128)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_api_usage_key_created')
+    .ifNotExists()
+    .on('developer_api_usage')
+    .columns(['key_id', 'created_at'])
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_developer_api_usage_user_created')
+    .ifNotExists()
+    .on('developer_api_usage')
+    .columns(['user_id', 'created_at'])
+    .execute();
+}
+
+/**
+ * Append-only IP/fingerprint history, added after ip_hash/fingerprint_id were
+ * already single-value columns. Kept separate from those columns rather than
+ * replacing them — everything that reads "current" IP/fingerprint (reveal-IP,
+ * ban checks, the users list) keeps working unchanged, and this just adds the
+ * full history on top for alt detection.
+ */
+export async function ensureUserHistoryColumns() {
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS ip_history jsonb NOT NULL DEFAULT '[]'::jsonb
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS fingerprint_history jsonb NOT NULL DEFAULT '[]'::jsonb
+  `.execute(mainDb);
+}
+
+export async function ensureSessionsAdvancedAtcColumn() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS is_advanced_atc boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+}
+
+/**
+ * New column: arrival runway, separate from active_runway (departures).
+ * Backfills existing rows to active_runway so arrival == departure until set otherwise.
+ */
+export async function ensureSessionsArrivalRunwayColumn() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS arrival_runway varchar(10)
+  `.execute(mainDb);
+
+  await sql`
+    UPDATE sessions
+    SET arrival_runway = active_runway
+    WHERE arrival_runway IS NULL AND active_runway IS NOT NULL
+  `.execute(mainDb);
+}
+
+export async function ensureSessionsNetworkFlagsExclusiveConstraint() {
+  await sql`
+    UPDATE sessions
+    SET is_advanced_atc = false
+    WHERE is_pfatc IS true AND is_advanced_atc IS true
+  `.execute(mainDb);
+
+  await sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'sessions_pfatc_advanced_exclusive'
+      ) THEN
+        ALTER TABLE sessions
+        ADD CONSTRAINT sessions_pfatc_advanced_exclusive
+        CHECK (NOT (is_pfatc AND is_advanced_atc));
+      END IF;
+    END $$;
+  `.execute(mainDb);
+}
+
+export async function ensureGlobalChatNetworkKindColumn() {
+  await sql`
+    ALTER TABLE global_chat
+    ADD COLUMN IF NOT EXISTS network_kind varchar(20) NOT NULL DEFAULT 'pfatc'
+  `.execute(mainDb);
+}
+
+export async function ensureSessionsDeveloperApiKeyColumn() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS developer_api_key_id bigint
+    REFERENCES developer_api_keys(id) ON DELETE SET NULL
+  `.execute(mainDb);
+
+  await mainDb.schema
+    .createIndex('idx_sessions_developer_api_key_id')
+    .ifNotExists()
+    .on('sessions')
+    .column('developer_api_key_id')
+    .execute();
+}
+
+export async function ensureDeveloperApiPolicyColumns() {
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS admin_notice_seq integer NOT NULL DEFAULT 0
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS notice_dismissed_seq integer NOT NULL DEFAULT 0
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS admin_notice_detail text
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS default_rate_limit_per_minute integer
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS notification_email varchar(320)
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_profiles
+    ADD COLUMN IF NOT EXISTS all_keys_scopes jsonb NOT NULL DEFAULT '[]'::jsonb
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS status varchar(16) NOT NULL DEFAULT 'active'
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS requested_scopes jsonb
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS rate_limit_per_minute integer
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS reviewed_by varchar(255)
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS reviewed_at timestamptz
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_keys
+    ADD COLUMN IF NOT EXISTS reviewer_note text
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE developer_api_keys
+    ALTER COLUMN secret_hash DROP NOT NULL
+  `.execute(mainDb);
+
+  await sql`
+    UPDATE developer_api_keys SET status = 'active' WHERE status IS NULL OR status = ''
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE developer_api_usage
+    ADD COLUMN IF NOT EXISTS client_ip varchar(128)
+  `.execute(mainDb);
+}
+
+export async function ensureDeveloperApiUsageBodyColumns() {
+  await sql`
+    ALTER TABLE developer_api_usage
+    ADD COLUMN IF NOT EXISTS request_body text
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE developer_api_usage
+    ADD COLUMN IF NOT EXISTS response_body text
+  `.execute(mainDb);
+}
+
+export async function ensureAppSettingsChannelColumn() {
+  await sql`
+    ALTER TABLE app_settings
+    ADD COLUMN IF NOT EXISTS channel varchar(50) NOT NULL DEFAULT 'production'
+  `.execute(mainDb);
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_channel ON app_settings (channel)
+  `.execute(mainDb);
+
+  // Seed the canary row from the production row if it doesn't exist yet
+  await sql`
+    INSERT INTO app_settings (version, channel, updated_at, updated_by)
+    SELECT version, 'canary', now(), 'system'
+    FROM app_settings
+    WHERE channel = 'production'
+    ON CONFLICT (channel) DO NOTHING
+  `.execute(mainDb);
+}
+
+export async function ensureTesterSettingsChannelColumn() {
+  await sql`
+    ALTER TABLE tester_settings
+    ADD COLUMN IF NOT EXISTS channel varchar(50) NOT NULL DEFAULT 'production'
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE tester_settings
+    DROP CONSTRAINT IF EXISTS tester_settings_setting_key_key
+  `.execute(mainDb);
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tester_settings_key_channel
+    ON tester_settings (setting_key, channel)
+  `.execute(mainDb);
+
+  await sql`
+    INSERT INTO tester_settings (setting_key, setting_value, channel, updated_at)
+    SELECT setting_key, setting_value, 'canary', now()
+    FROM tester_settings
+    WHERE channel = 'production'
+    ON CONFLICT (setting_key, channel) DO NOTHING
+  `.execute(mainDb);
+}
+
+export async function ensureEventModeColumns() {
+  await sql`
+    ALTER TABLE app_settings
+    ADD COLUMN IF NOT EXISTS pfatc_event_mode boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE app_settings
+    ADD COLUMN IF NOT EXISTS aatc_event_mode boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+}
+
+export async function ensureSurveySeed() {
+  const existing = await mainDb
+    .selectFrom('surveys')
+    .select('id')
+    .limit(1)
+    .executeTakeFirst();
+  if (existing) return;
+  for (const s of SEED_SURVEYS) {
+    await mainDb
+      .insertInto('surveys')
+      .values({
+        id: s.id,
+        title: s.title,
+        description: s.description,
+        questions: sql`CAST(${JSON.stringify(s.questions)} AS jsonb)`,
+        active: s.active,
+      })
+      .onConflict((oc) => oc.column('id').doNothing())
+      .execute();
+  }
+}
+
+export async function ensureTimestampDefaults() {
+  const frozen = await sql<{ table_name: string; column_name: string }>`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND data_type = 'timestamp with time zone'
+      AND column_default LIKE '''%''::timestamp with time zone'
+  `.execute(mainDb);
+  for (const { table_name, column_name } of frozen.rows) {
+    await sql`
+      ALTER TABLE ${sql.id(table_name)}
+      ALTER COLUMN ${sql.id(column_name)} SET DEFAULT now()
+    `.execute(mainDb);
+  }
+}
+
+export async function ensureSurveyDurationColumn() {
+  await sql`
+    ALTER TABLE survey_responses
+    ADD COLUMN IF NOT EXISTS duration_ms integer
+  `.execute(mainDb);
+}
+
+export async function ensureExternalAcarsLegacyRedirectColumn() {
+  await sql`
+    ALTER TABLE app_settings
+    ADD COLUMN IF NOT EXISTS external_acars_legacy_redirect boolean NOT NULL DEFAULT true
+  `.execute(mainDb);
+}
+
+export async function ensureFeedbackBannerColumn() {
+  await sql`
+    ALTER TABLE app_settings
+    ADD COLUMN IF NOT EXISTS feedback_banner_enabled boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+}
+
+export async function ensureFlightReqColumns() {
+  await sql`
+    ALTER TABLE flights
+    ADD COLUMN IF NOT EXISTS req_at timestamptz NULL
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE flights
+    ADD COLUMN IF NOT EXISTS req_phase varchar(4) NULL
+  `.execute(mainDb);
+}
+
+export async function ensureFlightRobloxUsernameColumn() {
+  await sql`
+    ALTER TABLE flights
+    ADD COLUMN IF NOT EXISTS roblox_username varchar(255) NULL
+  `.execute(mainDb);
+}
+
+export async function ensureFlightRobloxLinkedColumn() {
+  await sql`
+    ALTER TABLE flights
+    ADD COLUMN IF NOT EXISTS roblox_linked boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+}
+
+export async function ensureDailyDatabaseMetricsTables() {
+  await mainDb.schema
+    .createTable('daily_table_activity')
+    .ifNotExists()
+    .addColumn('activity_date', 'date', (col) => col.notNull())
+    .addColumn('table_name', 'varchar(128)', (col) => col.notNull())
+    .addColumn('rows_inserted', 'integer', (col) => col.notNull().defaultTo(0))
+    .addColumn('rows_deleted', 'integer', (col) => col.notNull().defaultTo(0))
+    .addColumn('table_bytes', 'bigint', (col) => col.notNull().defaultTo(0))
+    .addColumn('row_count', 'bigint', (col) => col.notNull().defaultTo(0))
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addColumn('updated_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .addPrimaryKeyConstraint('daily_table_activity_pkey', [
+      'activity_date',
+      'table_name',
+    ])
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_daily_table_activity_date')
+    .ifNotExists()
+    .on('daily_table_activity')
+    .column('activity_date')
+    .execute();
+
+  await mainDb.schema
+    .createTable('daily_database_totals')
+    .ifNotExists()
+    .addColumn('activity_date', 'date', (col) => col.primaryKey())
+    .addColumn('total_bytes', 'bigint', (col) => col.notNull())
+    .addColumn('created_at', 'timestamptz', (col) => col.defaultTo(sql`now()`))
+    .execute();
+
+  await ensureDailyTableActivityBigintColumns();
+}
+
+export async function ensureDailyTableActivityBigintColumns() {
+  await sql`
+    ALTER TABLE daily_table_activity
+      ALTER COLUMN rows_inserted TYPE bigint USING rows_inserted::bigint,
+      ALTER COLUMN rows_deleted TYPE bigint USING rows_deleted::bigint,
+      ALTER COLUMN table_bytes TYPE bigint USING table_bytes::bigint,
+      ALTER COLUMN row_count TYPE bigint USING row_count::bigint
+  `.execute(mainDb);
+}
+
+export async function ensureWebsocketSnapshotsTable() {
+  await mainDb.schema
+    .createTable('websocket_snapshots')
+    .ifNotExists()
+    .addColumn('id', 'bigserial', (col) => col.primaryKey())
+    .addColumn('namespace_id', 'varchar(64)', (col) => col.notNull())
+    .addColumn('connected_count', 'integer', (col) => col.notNull())
+    .addColumn('sampled_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_websocket_snapshots_sampled_at')
+    .ifNotExists()
+    .on('websocket_snapshots')
+    .column('sampled_at')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_websocket_snapshots_namespace_sampled')
+    .ifNotExists()
+    .on('websocket_snapshots')
+    .columns(['namespace_id', 'sampled_at'])
+    .execute();
+}
+
+export async function ensurePerformanceIndexes() {
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flights_session_updated
+    ON flights (session_id, updated_at DESC)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flights_arrival_updated
+    ON flights (arrival, updated_at DESC)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sessions_pfatc_airport
+    ON sessions (airport_icao)
+    WHERE is_pfatc = true
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_sessions_aatc_airport
+    ON sessions (airport_icao)
+    WHERE is_advanced_atc = true
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flights_updated_at
+    ON flights (updated_at)
+  `.execute(mainDb);
+}
+
+export async function syncVersionFromEnv(redis?: Redis) {
+  const envVersion = process.env.APP_VERSION?.trim();
+  if (!envVersion) {
+    return;
+  }
+
+  await mainDb
+    .insertInto('app_settings')
+    .values({
+      version: envVersion,
+      channel: DEPLOYMENT,
+      updated_at: new Date(),
+      updated_by: 'system',
+    })
+    .onConflict((oc) =>
+      oc.column('channel').doUpdateSet({
+        version: envVersion,
+        updated_at: new Date(),
+        updated_by: 'system',
+      })
+    )
+    .execute();
+
+  if (redis) {
+    try {
+      await redis.del(prefixKey('app:version'));
+    } catch (error) {
+      console.warn('[Version] Failed to invalidate version cache:', error);
+    }
+
+    try {
+      const staticDataKeys = [
+        'data:airports',
+        'data:aircrafts',
+        'data:airlines',
+        'data:waypoints',
+        'data:islands',
+        'data:frequencies',
+      ].map(prefixKey);
+      await redis.del(...staticDataKeys);
+    } catch (error) {
+      console.warn('[Version] Failed to invalidate static data cache:', error);
+    }
+  }
+
+  console.log(`[Version] Synced channel '${DEPLOYMENT}' to ${envVersion}`);
+}
+
+export async function ensureSessionsFeedbackEnabledColumn() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS feedback_enabled boolean NOT NULL DEFAULT true
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE sessions
+    ALTER COLUMN feedback_enabled SET DEFAULT true
+  `.execute(mainDb);
+}
+
+export async function ensureSessionsExternalSessionColumn() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS external_session boolean
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE sessions
+    ALTER COLUMN external_session DROP DEFAULT
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE sessions
+    ALTER COLUMN external_session DROP NOT NULL
+  `.execute(mainDb);
+}
+
+// StripLink: Google Forms intake. form_webhook_secret turns the session's webhook on;
+// google_form_id is only needed for the optional Forms API poller.
+export async function ensureSessionsGoogleFormColumns() {
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS form_webhook_secret varchar(64)
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS google_form_id varchar(128)
+  `.execute(mainDb);
+  await sql`
+    ALTER TABLE flights
+    ADD COLUMN IF NOT EXISTS submitted_via varchar(16)
+  `.execute(mainDb);
+}
+
+export async function ensureControllerRatingsCommentAndSessionColumns() {
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS comment text
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS session_id varchar(255)
+    REFERENCES sessions(session_id) ON DELETE SET NULL
+  `.execute(mainDb);
+
+  await mainDb.schema
+    .createIndex('idx_ctrl_ratings_session')
+    .ifNotExists()
+    .on('controller_ratings')
+    .column('session_id')
+    .execute();
+}
+
+export async function ensureControllerRatingsModerationColumns() {
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS reported boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS report_reason text
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS reported_at timestamptz
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS automod_flagged boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE controller_ratings
+    ADD COLUMN IF NOT EXISTS automod_reason text
+  `.execute(mainDb);
+}
+
+export async function ensureUserBioModerationColumns() {
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS bio_automod_flagged boolean NOT NULL DEFAULT false
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS bio_automod_reason text
+  `.execute(mainDb);
+}
+
+export async function ensureUserNotificationsIssuerColumns() {
+  await sql`
+    ALTER TABLE user_notifications
+    ADD COLUMN IF NOT EXISTS issued_by_admin_id varchar(255)
+  `.execute(mainDb);
+
+  await sql`
+    ALTER TABLE user_notifications
+    ADD COLUMN IF NOT EXISTS issued_by_admin_username varchar(255)
+  `.execute(mainDb);
+}
+
+export async function ensureUserNotificationsCreatedAtDefault() {
+  await sql`
+    ALTER TABLE user_notifications
+    ALTER COLUMN created_at SET DEFAULT now()
+  `.execute(mainDb);
+}
+
+export async function ensurePlatformTokenColumn() {
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS platform_token text
+  `.execute(mainDb);
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_platform_token
+    ON users (platform_token)
+    WHERE platform_token IS NOT NULL
+  `.execute(mainDb);
+}
+
+export async function ensureChartfoxLinksTable() {
+  await mainDb.schema
+    .createTable('chartfox_links')
+    .ifNotExists()
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.primaryKey().references('users.id').onDelete('cascade')
+    )
+    .addColumn('chartfox_user_id', 'integer')
+    .addColumn('chartfox_name', 'varchar(255)')
+    .addColumn('access_token', 'jsonb', (col) => col.notNull())
+    .addColumn('refresh_token', 'jsonb')
+    .addColumn('expires_at', 'timestamptz', (col) => col.notNull())
+    .addColumn('scopes', 'text')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+}
+
+export async function ensureFlightLogsTrigramIndexes() {
+  await sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flight_logs_username_trgm
+    ON flight_logs USING gin (username gin_trgm_ops)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flight_logs_flight_id_trgm
+    ON flight_logs USING gin (flight_id gin_trgm_ops)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flight_logs_user_id_trgm
+    ON flight_logs USING gin (user_id gin_trgm_ops)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flight_logs_old_data_trgm
+    ON flight_logs USING gin ((old_data::text) gin_trgm_ops)
+  `.execute(mainDb);
+
+  await sql`
+    CREATE INDEX IF NOT EXISTS idx_flight_logs_new_data_trgm
+    ON flight_logs USING gin ((new_data::text) gin_trgm_ops)
+  `.execute(mainDb);
+}
+
+export async function ensureBillingTables() {
+  await sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS stripe_customer_id varchar(255),
+    ADD COLUMN IF NOT EXISTS supporter_prefs jsonb NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS checkout_started_at timestamptz
+  `.execute(mainDb);
+
+  await mainDb.schema
+    .createTable('plan_grants')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('user_id', 'varchar(255)', (col) =>
+      col.notNull().references('users.id').onDelete('cascade')
+    )
+    .addColumn('plan', 'varchar(16)', (col) => col.notNull())
+    .addColumn('source', 'varchar(16)', (col) => col.notNull())
+    .addColumn('starts_at', 'timestamptz', (col) => col.notNull())
+    .addColumn('ends_at', 'timestamptz', (col) => col.notNull())
+    .addColumn('stripe_subscription_id', 'varchar(255)', (col) => col.unique())
+    .addColumn('stripe_checkout_session_id', 'varchar(255)', (col) =>
+      col.unique()
+    )
+    .addColumn('stripe_payment_intent_id', 'varchar(255)')
+    .addColumn('subscription_status', 'varchar(32)')
+    .addColumn('billing_interval', 'varchar(8)')
+    .addColumn('cancel_at_period_end', 'boolean')
+    .addColumn('gifted_by', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_plan_grants_user_id')
+    .ifNotExists()
+    .on('plan_grants')
+    .column('user_id')
+    .execute();
+
+  await mainDb.schema
+    .createIndex('idx_plan_grants_payment_intent')
+    .ifNotExists()
+    .on('plan_grants')
+    .column('stripe_payment_intent_id')
+    .execute();
+
+  // Basic and Ultimate were merged into Supporter.
+  await sql`
+    UPDATE plan_grants SET plan = 'supporter' WHERE plan IN ('basic', 'ultimate')
+  `.execute(mainDb);
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_stripe_customer_id
+    ON users (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL
+  `.execute(mainDb);
+}
+
+export async function ensureAdminBillingTables() {
+  await mainDb.schema
+    .createTable('chart_source_settings')
+    .ifNotExists()
+    .addColumn('source', 'varchar(16)', (col) => col.primaryKey())
+    .addColumn('enabled', 'boolean', (col) => col.notNull())
+    .addColumn('updated_by', 'varchar(255)')
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await mainDb.schema
+    .createTable('billing_expenses')
+    .ifNotExists()
+    .addColumn('id', 'serial', (col) => col.primaryKey())
+    .addColumn('label', 'varchar(120)', (col) => col.notNull())
+    .addColumn('amount_cents', 'integer', (col) => col.notNull())
+    .addColumn('cadence', 'varchar(8)', (col) => col.notNull())
+    .addColumn('starts_month', 'varchar(7)', (col) => col.notNull())
+    .addColumn('ends_month', 'varchar(7)')
+    .addColumn('created_by', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+}
+
+export async function ensureExternalAcarsProviderTables() {
+  await mainDb.schema
+    .createTable('external_acars_providers')
+    .ifNotExists()
+    .addColumn('id', 'varchar(32)', (col) => col.primaryKey())
+    .addColumn('display_name', 'varchar(80)', (col) => col.notNull())
+    .addColumn('api_base_url', 'text', (col) => col.notNull())
+    .addColumn('token_header', 'varchar(100)', (col) => col.notNull())
+    .addColumn('handoff_url', 'text', (col) => col.notNull())
+    .addColumn('handoff_api_key', 'jsonb')
+    .addColumn('enabled', 'boolean', (col) => col.notNull().defaultTo(true))
+    .addColumn('is_default', 'boolean', (col) => col.notNull().defaultTo(false))
+    .addColumn('created_by', 'varchar(255)')
+    .addColumn('created_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .addColumn('updated_by', 'varchar(255)')
+    .addColumn('updated_at', 'timestamptz', (col) =>
+      col.notNull().defaultTo(sql`now()`)
+    )
+    .execute();
+
+  await sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_external_acars_providers_default
+    ON external_acars_providers (is_default) WHERE is_default
+  `.execute(mainDb);
+}

@@ -1,0 +1,77 @@
+import rateLimit from 'express-rate-limit';
+
+export const sessionCreationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 3,
+  message: { error: 'Too many sessions created. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const flightCreationLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 3,
+  message: { error: 'Too many flights submitted. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const sessionDeletionLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 3,
+  message: { error: 'Too many sessions deleted. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const flightDeletionLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many flights deleted. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const acarsValidationLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 60,
+  message: {
+    error: 'Too many ACARS validation requests. Please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const generalApiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Too many requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const networkFlightBatchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: {
+    error: 'Too many network flight batch updates. Please slow down.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const chatMessageLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many messages. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+export const turnCredentialLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 15,
+  message: { error: 'Too many TURN credential requests. Please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

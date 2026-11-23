@@ -1,0 +1,136 @@
+import { useAuth } from '../hooks/auth/useAuth';
+import { Navigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { getTesterSettings } from '../utils/fetch/data';
+import AccessDenied from './AccessDenied';
+import RouteFallback from './skeletons/RouteFallback';
+import { getCurrentDeploymentChannel } from '../utils/deploymentChannel';
+
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  requireAdmin?: boolean;
+  requireTester?: boolean;
+  requireAuth?: boolean;
+  requirePermission?: string;
+  accessDeniedMessage?: string;
+}
+
+export default function ProtectedRoute({
+  children,
+  requireAdmin = false,
+  requireTester = true,
+  requireAuth = true,
+  requirePermission,
+}: ProtectedRouteProps) {
+  const { user, isLoading } = useAuth();
+  const [testerGateEnabled, setTesterGateEnabled] = useState<boolean | null>(
+    null
+  );
+
+  const shouldBypassTesterGate = () => {
+    return getCurrentDeploymentChannel() === 'production';
+  };
+
+  useEffect(() => {
+    if (!requireTester || (user && user.isAdmin)) {
+      setTesterGateEnabled(false);
+      return;
+    }
+
+    const checkGateStatus = async () => {
+      try {
+        if (shouldBypassTesterGate()) {
+          setTesterGateEnabled(false);
+          return;
+        }
+
+        const settings = await getTesterSettings();
+
+        if (settings) {
+          setTesterGateEnabled(settings.tester_gate_enabled);
+        } else {
+          console.error(
+            'Failed to fetch tester settings or invalid response:',
+            settings
+          );
+          setTesterGateEnabled(true);
+        }
+      } catch (error) {
+        console.error('Error fetching tester settings:', error);
+        setTesterGateEnabled(true);
+      }
+    };
+
+    checkGateStatus().then();
+  }, [requireTester, user]);
+
+  if (isLoading || (requireTester && testerGateEnabled === null)) {
+    return <RouteFallback />;
+  }
+
+  if (requireAuth && !user) {
+    return (
+      <Navigate
+        to={`/login?callback=${window.location.pathname + window.location.search}`}
+        replace
+      />
+    );
+  }
+  if (user && user.isBanned) {
+    return <AccessDenied errorType="banned" />;
+  }
+  if (user && user.isVpnBlocked) {
+    return <AccessDenied errorType="vpn-blocked" />;
+  }
+  if (requireAdmin && user && !user.isAdmin) {
+    return <AccessDenied message="Administrator Access Required" />;
+  }
+
+  if (requirePermission && user && !user.isAdmin) {
+    const hasPermission =
+      user.rolePermissions && user.rolePermissions[requirePermission];
+    if (!hasPermission) {
+      return (
+        <AccessDenied
+          message="Insufficient Permissions"
+          description={`You need '${requirePermission}' permission to access this page.`}
+        />
+      );
+    }
+  }
+
+  if (
+    requireTester &&
+    testerGateEnabled &&
+    !shouldBypassTesterGate() &&
+    user &&
+    !user.isAdmin &&
+    !user.isTester &&
+    !user.earlyAccess
+  ) {
+    return (
+      <AccessDenied
+        message="Tester Access Required"
+        description="This application is currently in testing. Please contact an administrator if you believe you should have access."
+        errorType="tester-required"
+      />
+    );
+  }
+
+  if (
+    !requireAuth &&
+    requireTester &&
+    testerGateEnabled &&
+    !shouldBypassTesterGate() &&
+    !user
+  ) {
+    return (
+      <Navigate
+        to={`/login?callback=${window.location.pathname + window.location.search}`}
+        replace
+      />
+    );
+  }
+
+  return <>{children}</>;
+}

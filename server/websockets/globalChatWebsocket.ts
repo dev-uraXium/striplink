@@ -1,0 +1,505 @@
+import { Server as SocketServer } from 'socket.io';
+import { mainDb } from '../db/connection.js';
+import { reportGlobalChatMessage } from '../db/chats.js';
+import { sanitizeMessage } from '../utils/sanitization.js';
+import {
+  containsHateSpeech,
+  getHateSpeechReason,
+} from '../utils/hateSpeechFilter.js';
+import { encrypt, decrypt } from '../utils/encryption.js';
+import { sql } from 'kysely';
+import type { Server } from 'http';
+import { createHandshakeRateLimiter } from './handshakeRateLimit.js';
+import { getSocketUser } from './socketAuth.js';
+import { allowedOrigins } from '../utils/allowedOrigins.js';
+
+const activeGlobalChatUsers = new Map<string, Set<string>>([
+  ['pfatc', new Set()],
+  // ['aatc', new Set()], // AATC disabled
+]);
+const connectedGlobalChatUsers = new Map<
+  string,
+  Map<
+    string,
+    {
+      id: string;
+      username: string;
+      avatar: string | null;
+      station: string | null;
+      position: string | null;
+      lastSeen: number;
+    }
+  >
+>([
+  ['pfatc', new Map()],
+  // ['aatc', new Map()], // AATC disabled
+]);
+
+// Cleanup inactive users from connectedGlobalChatUsers
+const cleanupInactiveGlobalUsers = () => {
+  const now = Date.now();
+  const INACTIVE_THRESHOLD = 5 * 60 * 1000;
+  let removedCount = 0;
+
+  for (const networkMap of connectedGlobalChatUsers.values()) {
+    for (const [userId, userData] of networkMap.entries()) {
+      if (now - userData.lastSeen > INACTIVE_THRESHOLD) {
+        networkMap.delete(userId);
+        removedCount++;
+      }
+    }
+  }
+
+  if (removedCount > 0) {
+    console.log(`[GlobalChat] Cleaned up ${removedCount} inactive users`);
+  }
+};
+
+const globalChatCleanupInterval = setInterval(
+  cleanupInactiveGlobalUsers,
+  2 * 60 * 1000
+);
+
+interface GlobalChatMessage {
+  id: number;
+  user_id: string;
+  username: string | null;
+  avatar: string | null;
+  station: string | null;
+  position: string | null;
+  message: string;
+  airport_mentions: string[] | null;
+  user_mentions: string[] | null;
+  sent_at: Date;
+  deleted_at: Date | null;
+}
+
+export function setupGlobalChatWebsocket(httpServer: Server) {
+  const io = new SocketServer(httpServer, {
+    path: '/sockets/global-chat',
+    allowRequest: createHandshakeRateLimiter({
+      scope: 'global-chat',
+      maxAttempts: 500,
+    }),
+    cors: {
+      origin: allowedOrigins(),
+      credentials: true,
+    },
+    perMessageDeflate: {
+      threshold: 512,
+    },
+  });
+
+  setInterval(
+    async () => {
+      try {
+        await mainDb
+          .updateTable('global_chat')
+          .set({ deleted_at: sql`(NOW() AT TIME ZONE 'UTC')` })
+          .where((eb) =>
+            eb(
+              sql`sent_at`,
+              '<',
+              sql`(NOW() AT TIME ZONE 'UTC') - INTERVAL '30 minutes'`
+            )
+          )
+          .where('deleted_at', 'is', null)
+          .execute();
+      } catch (error) {
+        console.error('[Global Chat] Error cleaning old messages:', error);
+      }
+    },
+    5 * 60 * 1000
+  );
+
+  io.on('connection', async (socket) => {
+    const station = Array.isArray(socket.handshake.query.station)
+      ? socket.handshake.query.station[0]
+      : socket.handshake.query.station;
+
+    const position = Array.isArray(socket.handshake.query.position)
+      ? socket.handshake.query.position[0]
+      : socket.handshake.query.position;
+
+    const rawNetworkKind = Array.isArray(socket.handshake.query.networkKind)
+      ? socket.handshake.query.networkKind[0]
+      : socket.handshake.query.networkKind;
+    // AATC disabled — force all connections to pfatc, reject aatc
+    const networkKind = 'pfatc' as const; // was: rawNetworkKind === 'aatc' ? 'aatc' : 'pfatc'
+    if (rawNetworkKind === 'aatc') {
+      socket.disconnect(true);
+      return;
+    }
+    const roomName = 'global-chat'; // was: networkKind === 'aatc' ? 'aatc-chat' : 'global-chat'
+
+    // Identity comes only from the verified auth cookie. Any userId/username/
+    // avatar sent by the client (query or payload) is ignored.
+    const socketUser = await getSocketUser(socket);
+    if (!socketUser) {
+      socket.disconnect(true);
+      return;
+    }
+    const userId = socketUser.userId;
+
+    socket.data.userId = userId;
+    socket.data.username = socketUser.username;
+    socket.data.avatar = socketUser.avatar;
+    socket.data.station = station;
+    socket.data.position = position;
+    socket.data.networkKind = networkKind;
+    socket.data.roomName = roomName;
+
+    socket.join(roomName);
+    socket.join(`user-${userId}`);
+
+    if (station && !connectedGlobalChatUsers.get(networkKind)!.has(userId)) {
+      const networkMap = connectedGlobalChatUsers.get(networkKind)!;
+      networkMap.set(userId, {
+        id: userId,
+        username: socketUser.username,
+        avatar: socketUser.avatar,
+        station: station,
+        position: position || null,
+        lastSeen: Date.now(),
+      });
+
+      io.to(roomName).emit(
+        'connectedGlobalChatUsers',
+        Array.from(networkMap.values())
+      );
+    }
+
+    socket.on('globalTyping', () => {
+      socket.broadcast
+        .to(roomName)
+        .emit('globalUserTyping', { userId, username: socketUser.username });
+    });
+
+    socket.on('globalChatMessage', async ({ message }) => {
+      if (typeof message !== 'string' || !message || message.length > 500)
+        return;
+
+      const sanitizedMessage = sanitizeMessage(message, 500);
+      if (!sanitizedMessage) return;
+
+      if (socket.data.station) {
+        const networkMap = connectedGlobalChatUsers.get(networkKind)!;
+        networkMap.set(userId, {
+          id: userId,
+          username: socketUser.username,
+          avatar: socketUser.avatar,
+          station: socket.data.station,
+          position: socket.data.position || null,
+          lastSeen: Date.now(),
+        });
+        io.to(roomName).emit(
+          'connectedGlobalChatUsers',
+          Array.from(networkMap.values())
+        );
+      }
+
+      const parsedAirportMentions = parseAirportMentions(sanitizedMessage);
+      const parsedUserMentions = parseUserMentions(sanitizedMessage);
+
+      const hasHateSpeech = containsHateSpeech(sanitizedMessage);
+      const automodded = hasHateSpeech;
+      const automodReason = hasHateSpeech
+        ? getHateSpeechReason(sanitizedMessage)
+        : undefined;
+
+      const encryptedMsg = encrypt(sanitizedMessage);
+      if (!encryptedMsg) {
+        socket.emit('chatError', { message: 'Failed to encrypt message' });
+        return;
+      }
+
+      try {
+        const result = await mainDb
+          .insertInto('global_chat')
+          .values({
+            id: sql`DEFAULT`,
+            user_id: userId,
+            username: socketUser.username,
+            avatar: socketUser.avatar ?? undefined,
+            station: socket.data.station ?? undefined,
+            position: socket.data.position ?? undefined,
+            message: JSON.stringify(encryptedMsg),
+            airport_mentions:
+              parsedAirportMentions.length > 0
+                ? JSON.stringify(parsedAirportMentions)
+                : undefined,
+            user_mentions:
+              parsedUserMentions.length > 0
+                ? JSON.stringify(parsedUserMentions)
+                : undefined,
+            sent_at: sql`NOW()`,
+            network_kind: networkKind,
+          })
+          .returning([
+            'id',
+            'user_id',
+            'username',
+            'avatar',
+            'station',
+            'position',
+            'message',
+            'airport_mentions',
+            'user_mentions',
+            'sent_at',
+          ])
+          .executeTakeFirst();
+
+        if (!result) {
+          socket.emit('chatError', { message: 'Failed to send message' });
+          return;
+        }
+
+        let decryptedMessage = '';
+        try {
+          if (result.message) {
+            const encryptedData =
+              typeof result.message === 'string'
+                ? JSON.parse(result.message)
+                : result.message;
+            decryptedMessage = decrypt(encryptedData) || '';
+          }
+        } catch (e) {
+          console.error('[Global Chat] Error decrypting message:', e);
+          decryptedMessage = '';
+        }
+
+        let airportMentions = null;
+        let userMentions = null;
+
+        if (result.airport_mentions) {
+          if (Array.isArray(result.airport_mentions)) {
+            airportMentions = result.airport_mentions;
+          } else if (
+            typeof result.airport_mentions === 'string' &&
+            result.airport_mentions.trim()
+          ) {
+            try {
+              airportMentions = JSON.parse(result.airport_mentions);
+            } catch (e) {
+              console.error('[Global Chat] Error parsing airport mentions:', e);
+              airportMentions = null;
+            }
+          }
+        }
+
+        if (result.user_mentions) {
+          if (Array.isArray(result.user_mentions)) {
+            userMentions = result.user_mentions;
+          } else if (
+            typeof result.user_mentions === 'string' &&
+            result.user_mentions.trim()
+          ) {
+            try {
+              userMentions = JSON.parse(result.user_mentions);
+            } catch (e) {
+              console.error('[Global Chat] Error parsing user mentions:', e);
+              userMentions = null;
+            }
+          }
+        }
+
+        const chatMsg: GlobalChatMessage = {
+          id: result.id,
+          user_id: result.user_id,
+          username: result.username ?? null,
+          avatar: result.avatar ?? null,
+          station: result.station ?? null,
+          position: result.position ?? null,
+          message: result.message as string,
+          airport_mentions: airportMentions,
+          user_mentions: userMentions,
+          sent_at: result.sent_at ? new Date(result.sent_at) : new Date(),
+          deleted_at: null,
+        };
+
+        const formattedMsg = {
+          id: chatMsg.id,
+          userId: chatMsg.user_id,
+          username: chatMsg.username,
+          avatar: chatMsg.avatar,
+          station: chatMsg.station,
+          position: chatMsg.position,
+          message: decryptedMessage,
+          airportMentions: chatMsg.airport_mentions,
+          userMentions: chatMsg.user_mentions,
+          sent_at: chatMsg.sent_at,
+          automodded,
+        };
+
+        io.to(roomName).emit('globalChatMessage', formattedMsg);
+
+        if (automodded) {
+          socket.emit('messageAutomodded', {
+            messageId: chatMsg.id,
+            reason: automodReason || 'Content violation detected',
+          });
+
+          try {
+            await reportGlobalChatMessage(
+              chatMsg.id,
+              'automod',
+              automodReason || 'Content violation detected'
+            );
+          } catch (error) {
+            console.error(
+              '[Global Chat] Error reporting automodded message:',
+              error
+            );
+          }
+        }
+
+        if (userMentions && userMentions.length > 0) {
+          try {
+            const users = await mainDb
+              .selectFrom('users')
+              .select(['id', 'username'])
+              .where('username', 'in', userMentions)
+              .execute();
+
+            for (const mentionedUser of users) {
+              io.to(roomName)
+                .to(`user-${mentionedUser.id}`)
+                .emit('globalChatMention', {
+                  messageId: String(chatMsg.id),
+                  mentionedUserId: mentionedUser.id,
+                  mentionerUsername: socketUser.username,
+                  message: chatMsg.message,
+                  timestamp: chatMsg.sent_at.toISOString(),
+                });
+            }
+          } catch (error) {
+            console.error('[Global Chat] Error sending user mentions:', error);
+          }
+        }
+
+        if (airportMentions && airportMentions.length > 0) {
+          for (const airport of airportMentions) {
+            io.to(roomName).emit('airportMention', {
+              airport: airport.toUpperCase(),
+              messageId: String(chatMsg.id),
+              mentionerUsername: socketUser.username,
+              message: chatMsg.message,
+              timestamp: chatMsg.sent_at.toISOString(),
+            });
+          }
+        }
+      } catch (error) {
+        console.error('[Global Chat] Error adding message:', error);
+        socket.emit('chatError', { message: 'Failed to send message' });
+      }
+    });
+
+    socket.on('deleteGlobalMessage', async ({ messageId }) => {
+      const id = Number(messageId);
+      if (!Number.isInteger(id)) {
+        socket.emit('deleteError', { messageId, error: 'Invalid message ID' });
+        return;
+      }
+      try {
+        // Only the verified author may delete; the payload userId is ignored.
+        const result = await mainDb
+          .updateTable('global_chat')
+          .set({ deleted_at: sql`NOW()` })
+          .where('id', '=', id)
+          .where('user_id', '=', userId)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst();
+
+        if (result.numUpdatedRows > 0) {
+          io.to(roomName).emit('globalMessageDeleted', { messageId });
+        } else {
+          socket.emit('deleteError', {
+            messageId,
+            error: 'Cannot delete this message',
+          });
+        }
+      } catch (error) {
+        console.error('[Global Chat] Error deleting message:', error);
+        socket.emit('deleteError', {
+          messageId,
+          error: 'Failed to delete message',
+        });
+      }
+    });
+
+    socket.on('globalChatOpened', () => {
+      const userId = socket.data.userId;
+      const nk: string = socket.data.networkKind || 'pfatc';
+      if (userId) {
+        activeGlobalChatUsers.get(nk)!.add(userId);
+        io.to(socket.data.roomName).emit(
+          'activeGlobalChatUsers',
+          Array.from(activeGlobalChatUsers.get(nk)!)
+        );
+      }
+    });
+
+    socket.on('globalChatClosed', () => {
+      const userId = socket.data.userId;
+      const nk: string = socket.data.networkKind || 'pfatc';
+      if (userId) {
+        activeGlobalChatUsers.get(nk)!.delete(userId);
+        io.to(socket.data.roomName).emit(
+          'activeGlobalChatUsers',
+          Array.from(activeGlobalChatUsers.get(nk)!)
+        );
+      }
+    });
+
+    socket.on('disconnect', () => {
+      const userId = socket.data.userId;
+      const nk: string = socket.data.networkKind || 'pfatc';
+      const room: string = socket.data.roomName || 'global-chat';
+      if (userId) {
+        activeGlobalChatUsers.get(nk)!.delete(userId);
+        connectedGlobalChatUsers.get(nk)!.delete(userId);
+        io.to(room).emit(
+          'activeGlobalChatUsers',
+          Array.from(activeGlobalChatUsers.get(nk)!)
+        );
+        io.to(room).emit(
+          'connectedGlobalChatUsers',
+          Array.from(connectedGlobalChatUsers.get(nk)!.values())
+        );
+      }
+    });
+  });
+
+  // Cleanup on shutdown
+  process.on('SIGTERM', () => {
+    console.log('[GlobalChat] Cleaning up intervals...');
+    clearInterval(globalChatCleanupInterval);
+    for (const m of connectedGlobalChatUsers.values()) m.clear();
+    for (const s of activeGlobalChatUsers.values()) s.clear();
+  });
+
+  return io;
+}
+
+function parseAirportMentions(message: string): string[] {
+  const airportRegex = /@([A-Za-z]{4})\b/g;
+  const mentions: string[] = [];
+  let match;
+  while ((match = airportRegex.exec(message)) !== null) {
+    mentions.push(match[1].toUpperCase());
+  }
+  return mentions;
+}
+
+function parseUserMentions(message: string): string[] {
+  const userRegex = /@(\w+)/g;
+  const mentions: string[] = [];
+  let match;
+  while ((match = userRegex.exec(message)) !== null) {
+    const mention = match[1];
+    if (!(mention.length === 4 && mention === mention.toUpperCase())) {
+      mentions.push(mention);
+    }
+  }
+  return mentions;
+}

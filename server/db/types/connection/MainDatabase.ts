@@ -1,0 +1,83 @@
+import { AppSettingsTable } from './main/AppSettingsTable';
+import { UsersTable } from './main/UsersTable';
+import { SessionsTable } from './main/SessionsTable';
+import { RolesTable } from './main/RolesTable';
+import { UserRolesTable } from './main/UserRolesTable';
+import { AuditLogTable } from './main/AuditLogTable';
+import { BansTable } from './main/BansTable';
+import { NotificationsTable } from './main/NotificationsTable';
+import { UserNotificationsTable } from './main/UserNotificationsTable';
+import { SurveyResponsesTable } from './main/SurveyResponsesTable';
+import { SurveysTable } from './main/SurveysTable';
+import { TestersTable } from './main/TestersTable';
+import { TesterSettingsTable } from './main/TesterSettingsTable';
+import { DailyStatisticsTable } from './main/DailyStatisticsTable';
+import { ChatReportsTable } from './main/ChatReportsTable';
+import { UpdateModalsTable } from './main/UpdateModalsTable';
+import { FlightLogsTable } from './main/FlightLogsTable';
+import { FeedbackTable } from './main/FeedbackTable';
+import { ApiLogsTable } from './main/ApiLogsTable';
+import { ControllerRatingsTable } from './main/ControllerRatingsTable';
+import { FlightsTable } from './main/FlightsTable';
+import { SessionChatTable } from './main/SessionChatTable';
+import { GlobalChatTable } from './main/GlobalChatTable';
+import { PilotChatTable } from './main/PilotChatTable';
+import { VpnExceptionsTable } from './main/VpnExceptionsTable';
+import { VpnGateSettingsTable } from './main/VpnGateSettingsTable';
+import { DeveloperApplicationsTable } from './main/DeveloperApplicationsTable';
+import { DeveloperProfilesTable } from './main/DeveloperProfilesTable';
+import { DeveloperApiKeysTable } from './main/DeveloperApiKeysTable';
+import { DeveloperApiUsageTable } from './main/DeveloperApiUsageTable';
+import {
+  DailyDatabaseTotalsTable,
+  DailyTableActivityTable,
+} from './main/DailyTableActivityTable';
+import { WebsocketSnapshotsTable } from './main/WebsocketSnapshotsTable';
+import { ChartfoxLinksTable } from './main/ChartfoxLinksTable';
+import { PlanGrantsTable } from './main/PlanGrantsTable';
+import {
+  BillingExpensesTable,
+  ChartSourceSettingsTable,
+} from './main/AdminBillingTables';
+import { ExternalAcarsProvidersTable } from './main/ExternalAcarsProvidersTable';
+
+export interface MainDatabase {
+  app_settings: AppSettingsTable;
+  users: UsersTable;
+  sessions: SessionsTable;
+  roles: RolesTable;
+  user_roles: UserRolesTable;
+  audit_log: AuditLogTable;
+  bans: BansTable;
+  notifications: NotificationsTable;
+  user_notifications: UserNotificationsTable;
+  survey_responses: SurveyResponsesTable;
+  surveys: SurveysTable;
+  testers: TestersTable;
+  tester_settings: TesterSettingsTable;
+  daily_statistics: DailyStatisticsTable;
+  chat_report: ChatReportsTable;
+  update_modals: UpdateModalsTable;
+  flight_logs: FlightLogsTable;
+  feedback: FeedbackTable;
+  api_logs: ApiLogsTable;
+  controller_ratings: ControllerRatingsTable;
+  flights: FlightsTable;
+  session_chat: SessionChatTable;
+  global_chat: GlobalChatTable;
+  pilot_chat: PilotChatTable;
+  vpn_exceptions: VpnExceptionsTable;
+  vpn_gate_settings: VpnGateSettingsTable;
+  developer_applications: DeveloperApplicationsTable;
+  developer_profiles: DeveloperProfilesTable;
+  developer_api_keys: DeveloperApiKeysTable;
+  developer_api_usage: DeveloperApiUsageTable;
+  daily_table_activity: DailyTableActivityTable;
+  daily_database_totals: DailyDatabaseTotalsTable;
+  websocket_snapshots: WebsocketSnapshotsTable;
+  chartfox_links: ChartfoxLinksTable;
+  plan_grants: PlanGrantsTable;
+  chart_source_settings: ChartSourceSettingsTable;
+  billing_expenses: BillingExpensesTable;
+  external_acars_providers: ExternalAcarsProvidersTable;
+}

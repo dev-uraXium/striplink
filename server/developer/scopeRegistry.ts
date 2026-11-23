@@ -1,0 +1,213 @@
+export {
+  matchExtDataRoute,
+  matchExtDeveloperRoute,
+  DEVELOPER_EXT_ROUTES,
+} from './extRoutes.js';
+export type {
+  DeveloperExtRouteDefinition,
+  DeveloperExtRouteParamDoc,
+  DeveloperExtRouteQueryDoc,
+} from './extRoutes.js';
+
+export interface DeveloperScopeCatalogEntry {
+  id: string;
+  label: string;
+  description: string;
+  hidden?: boolean;
+}
+
+export const DEVELOPER_SCOPE_CATALOG: DeveloperScopeCatalogEntry[] = [
+  {
+    id: 'data.airports',
+    label: 'Airport directory',
+    description: 'Full airport dataset (ICAO, runways metadata bundle, etc.).',
+  },
+  {
+    id: 'data.aircrafts',
+    label: 'Aircraft types',
+    description: 'Aircraft reference data.',
+  },
+  {
+    id: 'data.airlines',
+    label: 'Airlines',
+    description: 'Airline reference data.',
+  },
+  {
+    id: 'data.frequencies',
+    label: 'Frequencies summary',
+    description: 'Per-airport frequency summaries derived from airport data.',
+  },
+  {
+    id: 'data.backgrounds',
+    label: 'Background assets',
+    description: 'List of available session background images.',
+  },
+  {
+    id: 'data.airport_runways',
+    label: 'Airport runways',
+    description:
+      'GET /data/airports/:icao/runways — runway list for one airport.',
+  },
+  {
+    id: 'data.airport_sids',
+    label: 'Airport SIDs',
+    description: 'GET /data/airports/:icao/sids — SID definitions.',
+  },
+  {
+    id: 'data.airport_stars',
+    label: 'Airport STARs',
+    description: 'GET /data/airports/:icao/stars — STAR definitions.',
+  },
+  {
+    id: 'data.find_route',
+    label: 'Route finder',
+    description:
+      'GET /data/findRoute?from=&to= — waypoint graph route between fixes.',
+  },
+  {
+    id: 'data.airport_status',
+    label: 'Airport status',
+    description:
+      'GET /data/airports/:icao/status — active PFATC session, METAR, etc.',
+  },
+  {
+    id: 'sessions.network_pfatc',
+    label: 'PFATC sessions',
+    description:
+      'GET /sessions/network/pfatc — list PFATC network sessions worldwide (sanitized). Optional GET /sessions/network/pfatc/{sessionId} for one row.',
+  },
+  {
+    id: 'sessions.network_overview',
+    label: 'Network overview',
+    description:
+      'GET /sessions/network/overview — every PFATC session network-wide created or flight-active in the last 4 hours (no live controller required) with nested flights updated in the last 30 minutes, controllers, and ATIS, plus an arrivals-by-airport index. GET /sessions/network/flights — the same active sessions, flattened to a plain array of flight objects. Available from API v2.',
+  },
+  {
+    id: 'flights.network_manage',
+    label: 'Manage network flights',
+    description:
+      'PUT /sessions/network/flights — batch-update flights on any PFATC session network-wide, not limited to sessions you own. Restricted field set (callsign, remark, squawk, clearedFL, cruisingFL, runway, stand, gate, sid, star, req_at, req_phase, clearance) — the same fields an event controller can touch from the live Overview page. Available from API v2.',
+  },
+  // AATC disabled — sessions.network_aatc scope commented out
+  // {
+  //   id: 'sessions.network_aatc',
+  //   label: 'AATC sessions',
+  //   description: 'GET /sessions/network/aatc — list Advanced ATC (AATC) network sessions worldwide.',
+  // },
+  {
+    id: 'sessions.list',
+    label: 'List my sessions',
+    description:
+      'GET /sessions — sessions you created; join codes are never returned.',
+  },
+  {
+    id: 'sessions.create',
+    label: 'Create session',
+    description:
+      'POST /sessions — creates a session tied to this API key (API-managed for scoped updates).',
+  },
+  {
+    id: 'sessions.read',
+    label: 'Read session',
+    description:
+      'GET /sessions/:sessionId — metadata for a session you own (sanitized).',
+  },
+  {
+    id: 'sessions.update',
+    label: 'Update session',
+    description:
+      'PUT /sessions/:sessionId — update customName, activeRunway, arrivalRunway, and/or ATIS for a session you own.',
+  },
+  {
+    id: 'flights.list',
+    label: 'List session flights',
+    description:
+      'GET /sessions/:sessionId/flights — all flights in a session you own (sanitized).',
+  },
+  {
+    id: 'flights.read',
+    label: 'Read flight',
+    description:
+      'GET /sessions/:sessionId/flights/:flightId — one flight (sanitized).',
+  },
+  {
+    id: 'flights.create',
+    label: 'Create flight',
+    description:
+      'POST /sessions/:sessionId/flights — add a flight to a session you own.',
+  },
+  {
+    id: 'flights.update',
+    label: 'Update flight',
+    description:
+      'PUT /sessions/:sessionId/flights/:flightId — v3 rejects unsupported or invalid fields with HTTP 400 and makes no partial write; updates are only allowed for sessions created with this same API key.',
+  },
+  {
+    id: 'flights.delete',
+    label: 'Delete flight',
+    description:
+      'DELETE /sessions/:sessionId/flights/:flightId — delete only for sessions created with this same API key. Available from API v2.',
+  },
+  {
+    id: 'sessions.delete',
+    label: 'Delete session',
+    description:
+      'DELETE /sessions/:sessionId — delete a session created with this same API key. Flights already logged in the session are left in place (orphaned), not deleted. Available from API v2.',
+  },
+  {
+    id: 'ratings.controller_stats',
+    label: 'Controller rating stats',
+    description:
+      'GET /ratings/controllers/{controllerId}/stats — aggregate average and count only (no pilot rows).',
+  },
+  {
+    id: 'notifications.read',
+    label: 'Active notifications',
+    description:
+      'GET /notifications/active — public announcement banners (no admin CRUD).',
+  },
+  {
+    id: 'sessions.network_claim',
+    label: 'Claim PFATC sessions (external ACARS)',
+    description:
+      'POST/DELETE /sessions/network/claims/{sessionId}, GET /sessions/network/claims — claim a PFATC session so pilots who file there afterwards open StripLink’s external ACARS page through a registered provider. Claims expire (renewable) and stop working as soon as this key is revoked or loses the scope. Admin-granted only.',
+    hidden: true,
+  },
+  {
+    id: 'flight_logs.read',
+    label: 'Own session flight logs (metadata)',
+    description:
+      'GET /flight-logs — audit metadata for sessions you own; no IPs, no old/new JSON bodies.',
+  },
+];
+
+export const ALL_DEVELOPER_SCOPE_IDS: string[] = DEVELOPER_SCOPE_CATALOG.map(
+  (s) => s.id
+);
+
+export function isValidScopeList(scopes: unknown): scopes is string[] {
+  if (!Array.isArray(scopes)) return false;
+  if (scopes.length === 0) return false;
+  const set = new Set(ALL_DEVELOPER_SCOPE_IDS);
+  return scopes.every((s) => typeof s === 'string' && set.has(s));
+}
+
+export const PUBLIC_DEVELOPER_SCOPE_CATALOG: DeveloperScopeCatalogEntry[] =
+  DEVELOPER_SCOPE_CATALOG.filter((s) => !s.hidden);
+
+const HIDDEN_SCOPE_IDS = new Set(
+  DEVELOPER_SCOPE_CATALOG.filter((s) => s.hidden).map((s) => s.id)
+);
+
+export function isHiddenScope(scopeId: string): boolean {
+  return HIDDEN_SCOPE_IDS.has(scopeId);
+}
+
+export function isValidPublicScopeList(scopes: unknown): scopes is string[] {
+  return isValidScopeList(scopes) && !scopes.some(isHiddenScope);
+}
+
+export function isScopeSubset(scopes: string[], allowed: string[]): boolean {
+  const allow = new Set(allowed);
+  return scopes.every((s) => allow.has(s));
+}

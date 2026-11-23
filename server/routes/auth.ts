@@ -1,0 +1,1169 @@
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
+import axios, { AxiosError } from 'axios';
+import {
+  createOrUpdateUser,
+  getUserById,
+  updateUserSettings,
+  updateRobloxAccount,
+  unlinkRobloxAccount,
+  updateTutorialStatus,
+  updateUserFingerprint,
+  ensureUserPlatformToken,
+} from '../db/users.js';
+import { authLimiter, createAuthLimiter } from '../middleware/security.js';
+import { detectVPN, isVpnRequest } from '../utils/detectVPN.js';
+import { isAdmin } from '../middleware/admin.js';
+import { recordLogin, recordNewUser } from '../db/statistics.js';
+import { isUserBanned, isIpBanned, BAN_CACHE_TTL } from '../db/ban.js';
+import { redisConnection } from '../db/connection.js';
+import { isTester } from '../db/testers.js';
+import { getPlanState } from '../billing/entitlements.js';
+import { planAtLeast } from '../billing/plans.js';
+import {
+  getPlanLimits,
+  hasLapsedAnimatedBackground,
+} from '../billing/limits.js';
+import { isVpnGateEnabled, isVpnException } from '../db/vpnExceptions.js';
+import { getClientIp } from '../utils/getIpAddress.js';
+import { getUserRank, STATS_KEYS } from '../db/leaderboard.js';
+import requireAuth, {
+  requireAuthSoft,
+  requirePlatformIdentity,
+} from '../middleware/auth.js';
+import posthog, { capture } from '../utils/posthog.js';
+import {
+  VATSIM_RATINGS,
+  refreshVatsimRatingIfStale,
+  refreshVatsimRatingManually,
+} from '../services/vatsimRating.js';
+
+const router = express.Router();
+
+const CLIENT_ID = process.env.DISCORD_CLIENT_ID ?? '';
+const CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET ?? '';
+const REDIRECT_URI = process.env.DISCORD_REDIRECT_URI ?? '';
+const FRONTEND_URL = process.env.FRONTEND_URL ?? '';
+const JWT_SECRET = process.env.JWT_SECRET ?? '';
+
+const ROBLOX_CLIENT_ID = process.env.ROBLOX_CLIENT_ID ?? '';
+const ROBLOX_CLIENT_SECRET = process.env.ROBLOX_CLIENT_SECRET ?? '';
+const ROBLOX_REDIRECT_URI = process.env.ROBLOX_REDIRECT_URI ?? '';
+
+const VATSIM_CLIENT_ID = process.env.VATSIM_CLIENT_ID ?? '';
+const VATSIM_CLIENT_SECRET = process.env.VATSIM_CLIENT_SECRET ?? '';
+const VATSIM_REDIRECT_URI = process.env.VATSIM_REDIRECT_URI ?? '';
+const VATSIM_AUTH_BASE = process.env.VATSIM_AUTH_BASE ?? '';
+
+const BIO_MAX_LENGTH = 300;
+const BIO_MAX_LINES = 5;
+
+const platformTokenCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+  path: '/',
+  domain: process.env.COOKIE_DOMAIN || undefined,
+};
+
+interface DiscordAuthState {
+  callback?: string;
+  consent?: boolean;
+}
+
+const DISCORD_LOGIN_ERRORS = new Set(['access_denied']);
+
+function encodeDiscordState(state: DiscordAuthState): string {
+  return Buffer.from(JSON.stringify(state)).toString('base64');
+}
+
+function decodeDiscordState(raw: unknown): DiscordAuthState {
+  if (typeof raw !== 'string' || !raw) return {};
+  try {
+    const decoded = JSON.parse(Buffer.from(raw, 'base64').toString());
+    if (!decoded || typeof decoded !== 'object') return {};
+    return {
+      callback:
+        typeof decoded.callback === 'string' ? decoded.callback : undefined,
+      consent: decoded.consent === true,
+    };
+  } catch (err) {
+    console.error('Error decoding state:', err);
+    return {};
+  }
+}
+
+function discordLoginErrorUrl(error: string, callback?: string): string {
+  const params = new URLSearchParams({ error });
+  if (callback && callback.startsWith('/')) {
+    params.set('callback', callback);
+  }
+  return `${FRONTEND_URL}/login?${params.toString()}`;
+}
+
+const discordCallbackLimiter = createAuthLimiter((req, res) => {
+  const { callback } = decodeDiscordState(req.query.state);
+  res.redirect(discordLoginErrorUrl('rate_limited', callback));
+});
+
+// GET: /api/auth/discord
+interface LoginUser {
+  id: string;
+  username: string;
+  discriminator?: string;
+  avatar?: string;
+}
+
+/** Creates/updates the user and sets the auth + platform cookies (shared by Discord and dev login). */
+async function finishLogin(
+  req: express.Request,
+  res: express.Response,
+  discordUser: LoginUser,
+  tokens: { accessToken: string; refreshToken: string }
+) {
+
+    const ipAddress = getClientIp(req);
+    const isVpn = await detectVPN(req);
+
+    const existingUser = await getUserById(discordUser.id);
+    const isNewUser = !existingUser;
+
+    await createOrUpdateUser({
+      id: discordUser.id,
+      username: discordUser.username,
+      discriminator: discordUser.discriminator || '0',
+      avatar: discordUser.avatar,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      ipAddress: ipAddress,
+      isVpn: isVpn,
+    });
+
+    await recordLogin();
+    if (isNewUser) {
+      await recordNewUser();
+      capture(req, {
+        distinctId: discordUser.id,
+        event: 'user_signed_up',
+        properties: {
+          username: discordUser.username,
+          $set_once: { created_at: new Date().toISOString() },
+        },
+      });
+    }
+
+    posthog.identify({
+      distinctId: discordUser.id,
+      properties: {
+        username: discordUser.username,
+        discord_id: discordUser.id,
+        is_admin: isAdmin(discordUser.id),
+        is_vpn: isVpn,
+      },
+    });
+    capture(req, {
+      distinctId: discordUser.id,
+      event: 'user_logged_in',
+      properties: { username: discordUser.username, is_vpn: isVpn },
+    });
+
+    const payload = {
+      userId: discordUser.id,
+      username: discordUser.username,
+      discriminator: discordUser.discriminator || '0',
+      avatar: discordUser.avatar,
+      isAdmin: isAdmin(discordUser.id),
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7d
+    };
+
+    const token = jwt.sign(payload, JWT_SECRET as string, {
+      algorithm: 'HS256',
+    });
+
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
+      path: '/',
+    });
+
+    const platformToken = await ensureUserPlatformToken(discordUser.id);
+    res.cookie('platform_token', platformToken, {
+      ...platformTokenCookieOptions,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7d
+    });
+
+}
+
+router.get('/discord', (req, res) => {
+  if (!CLIENT_ID || !REDIRECT_URI) {
+    return res.status(500).json({ error: 'Discord OAuth not configured' });
+  }
+  const callback =
+    typeof req.query.callback === 'string' ? req.query.callback : undefined;
+  const consent = req.query.consent === '1';
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: 'code',
+    scope: 'identify',
+    prompt: consent ? 'consent' : 'none',
+    state: encodeDiscordState({ callback, consent }),
+  });
+
+  const discordAuthUrl = `https://discord.com/api/oauth2/authorize?${params.toString()}`;
+  res.redirect(discordAuthUrl);
+});
+
+// GET: /api/auth/discord/callback - handle Discord OAuth2 callback
+// Local testing only: sign in as a fake user without a Discord app.
+// Enabled by DEV_LOGIN=true and never in production.
+router.get('/dev-login', authLimiter, async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.DEV_LOGIN !== 'true') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const username =
+    String(req.query.username || 'dev')
+      .replace(/[^a-zA-Z0-9_.]/g, '')
+      .slice(0, 32) || 'dev';
+  // Stable snowflake-like id per username (Discord ids are numeric strings)
+  const hash = crypto.createHash('sha256').update(`dev:${username.toLowerCase()}`).digest();
+  const id = '9' + (hash.readBigUInt64BE(0) % 10n ** 17n).toString().padStart(17, '0');
+  try {
+    await finishLogin(req, res, { id, username }, { accessToken: 'dev', refreshToken: 'dev' });
+    const callback = typeof req.query.callback === 'string' ? req.query.callback : '/';
+    res.redirect(FRONTEND_URL + (callback.startsWith('/') && !callback.startsWith('//') ? callback : '/'));
+  } catch (error) {
+    console.error('Dev login error:', error);
+    res.status(500).json({ error: 'Dev login failed' });
+  }
+});
+
+router.get('/discord/callback', discordCallbackLimiter, async (req, res) => {
+  const { code, error: oauthError } = req.query;
+  const { callback, consent } = decodeDiscordState(req.query.state);
+
+  if (typeof oauthError === 'string' && oauthError) {
+    if (!consent) {
+      const params = new URLSearchParams({ consent: '1' });
+      if (callback) params.set('callback', callback);
+      return res.redirect(`${req.baseUrl}/discord?${params.toString()}`);
+    }
+    return res.redirect(
+      discordLoginErrorUrl(
+        DISCORD_LOGIN_ERRORS.has(oauthError) ? oauthError : 'discord_error',
+        callback
+      )
+    );
+  }
+
+  if (!code) {
+    return res.redirect(discordLoginErrorUrl('missing_code', callback));
+  }
+
+  try {
+    const tokenResponse = await axios.post(
+      'https://discord.com/api/oauth2/token',
+      new URLSearchParams({
+        client_id: String(CLIENT_ID),
+        client_secret: String(CLIENT_SECRET),
+        grant_type: 'authorization_code',
+        code: String(code),
+        redirect_uri: String(REDIRECT_URI),
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    const { access_token, refresh_token } = tokenResponse.data;
+
+    const userResponse = await axios.get('https://discord.com/api/users/@me', {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+      },
+    });
+
+    const discordUser = userResponse.data;
+    await finishLogin(req, res, discordUser, {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+    });
+
+    const redirectUrl =
+      callback && callback.startsWith('/')
+        ? FRONTEND_URL + callback
+        : FRONTEND_URL + '/';
+    res.redirect(redirectUrl);
+  } catch (error) {
+    console.error('Discord auth error:', error);
+    res.redirect(discordLoginErrorUrl('auth_failed', callback));
+  }
+});
+
+// GET: /api/auth/roblox - redirect to Roblox for authentication
+router.get('/roblox', requireAuth, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const state = jwt.sign({ userId: req.user.userId }, JWT_SECRET as string, {
+    expiresIn: '15m',
+  });
+
+  const params = new URLSearchParams({
+    client_id: String(ROBLOX_CLIENT_ID),
+    redirect_uri: String(ROBLOX_REDIRECT_URI),
+    response_type: 'code',
+    scope: 'openid profile',
+    state: state,
+  });
+
+  const robloxAuthUrl = `https://apis.roblox.com/oauth/v1/authorize?${params.toString()}`;
+  res.redirect(robloxAuthUrl);
+});
+
+// GET: /api/auth/roblox/callback - handle Roblox OAuth2 callback
+router.get('/roblox/callback', authLimiter, async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+
+  if (!code || !state) {
+    return res.redirect(FRONTEND_URL + '/settings?error=roblox_auth_failed');
+  }
+
+  try {
+    const decoded = jwt.verify(state, JWT_SECRET as string) as {
+      userId: string;
+    };
+    const userId = decoded.userId;
+
+    const tokenResponse = await axios.post(
+      'https://apis.roblox.com/oauth/v1/token',
+      new URLSearchParams({
+        client_id: String(ROBLOX_CLIENT_ID),
+        client_secret: String(ROBLOX_CLIENT_SECRET),
+        grant_type: 'authorization_code',
+        code: String(code),
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    const { access_token, refresh_token } = tokenResponse.data;
+
+    const userResponse = await axios.get(
+      'https://apis.roblox.com/oauth/v1/userinfo',
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+        },
+      }
+    );
+
+    const robloxUser = userResponse.data;
+
+    await updateRobloxAccount(userId, {
+      robloxUserId: robloxUser.sub,
+      robloxUsername: robloxUser.preferred_username || robloxUser.name,
+      accessToken: access_token,
+      refreshToken: refresh_token,
+    });
+
+    posthog.identify({
+      distinctId: userId,
+      properties: {
+        has_roblox: true,
+        roblox_username: robloxUser.preferred_username || robloxUser.name,
+        roblox_user_id: robloxUser.sub,
+      },
+    });
+    capture(req, {
+      distinctId: userId,
+      event: 'roblox_linked',
+      properties: {
+        roblox_username: robloxUser.preferred_username || robloxUser.name,
+      },
+    });
+
+    res.redirect(FRONTEND_URL + '/settings?roblox_linked=true');
+  } catch (error) {
+    console.error('Roblox auth error:', error);
+    res.redirect(FRONTEND_URL + '/settings?error=roblox_auth_failed');
+  }
+});
+
+// POST: /api/auth/roblox/unlink - unlink Roblox account
+router.post('/roblox/unlink', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    await unlinkRobloxAccount(req.user.userId);
+    posthog.identify({
+      distinctId: req.user.userId,
+      properties: {
+        has_roblox: false,
+        roblox_username: null,
+        roblox_user_id: null,
+      },
+    });
+    capture(req, { distinctId: req.user.userId, event: 'roblox_unlinked' });
+    res.json({ success: true, message: 'Roblox account unlinked' });
+  } catch (error) {
+    console.error('Error unlinking Roblox:', error);
+    res.status(500).json({ error: 'Failed to unlink Roblox account' });
+  }
+});
+
+// GET: /api/auth/vatsim - redirect to VATSIM for linking
+router.get('/vatsim', requireAuth, (req, res) => {
+  if (!VATSIM_CLIENT_ID || !VATSIM_REDIRECT_URI || !VATSIM_AUTH_BASE) {
+    return res.status(500).json({ error: 'VATSIM OAuth not configured' });
+  }
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  const state = jwt.sign({ userId: req.user.userId }, JWT_SECRET as string, {
+    expiresIn: '15m',
+  });
+  const params = new URLSearchParams({
+    client_id: String(VATSIM_CLIENT_ID),
+    redirect_uri: String(VATSIM_REDIRECT_URI),
+    response_type: 'code',
+    scope: 'vatsim_details',
+    state,
+  });
+  const forceCookie = req.cookies && req.cookies.vatsim_force === '1';
+  if (req.query.force === '1' || req.query.force === 'true' || forceCookie) {
+    params.set('prompt', 'login');
+    params.set('approval_prompt', 'force');
+    if (forceCookie) {
+      res.clearCookie('vatsim_force', { path: '/' });
+    }
+  }
+  console.log(VATSIM_AUTH_BASE);
+  const url = `${VATSIM_AUTH_BASE.replace(/\/$/, '')}/oauth/authorize?${params.toString()}`;
+  res.redirect(url);
+});
+
+// GET: /api/auth/vatsim/callback - handle VATSIM OAuth2 callback (server-side)
+router.get('/vatsim/callback', authLimiter, async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : '';
+  const state = typeof req.query.state === 'string' ? req.query.state : '';
+  if (!code || !state) {
+    return res.redirect(FRONTEND_URL + '/settings?error=vatsim_auth_failed');
+  }
+
+  try {
+    let decoded;
+    try {
+      decoded = jwt.verify(String(state), JWT_SECRET as string);
+    } catch (err) {
+      console.log(err);
+      return res.redirect(FRONTEND_URL + '/settings?error=vatsim_auth_failed');
+    }
+    let userId: string | undefined;
+    if (
+      typeof decoded === 'object' &&
+      decoded !== null &&
+      'userId' in decoded
+    ) {
+      userId = (decoded as { userId: string }).userId;
+    }
+    if (!userId) {
+      return res.redirect(FRONTEND_URL + '/settings?error=vatsim_auth_failed');
+    }
+
+    if (!VATSIM_CLIENT_ID || !VATSIM_CLIENT_SECRET || !VATSIM_REDIRECT_URI) {
+      return res.redirect(
+        FRONTEND_URL + '/settings?error=vatsim_not_configured'
+      );
+    }
+
+    const basic = Buffer.from(
+      `${VATSIM_CLIENT_ID}:${VATSIM_CLIENT_SECRET}`
+    ).toString('base64');
+    const tokenResponse = await axios.post(
+      `${VATSIM_AUTH_BASE.replace(/\/$/, '')}/oauth/token`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        redirect_uri: String(VATSIM_REDIRECT_URI),
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          Authorization: `Basic ${basic}`,
+        },
+      }
+    );
+
+    const { access_token } = tokenResponse.data || {};
+    if (!access_token) {
+      return res.redirect(FRONTEND_URL + '/settings?error=vatsim_token_failed');
+    }
+
+    const userResponse = await axios.get(
+      `${VATSIM_AUTH_BASE.replace(/\/$/, '')}/api/user`,
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+      }
+    );
+
+    const payload = userResponse.data || {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const root: Record<string, any> = payload.data || payload.user || payload;
+    const cid = String(root?.cid ?? root?.id ?? '');
+    const candidates = [
+      root?.rating?.controller,
+      root?.ratings?.controller,
+      root?.ratings?.atc,
+      root?.controller_rating,
+      root?.controller,
+      root?.rating,
+      root?.vatsim?.rating,
+      root?.vatsim?.ratings?.controller,
+    ].filter(Boolean);
+    let ratingShort: string | null = null;
+    let ratingLong: string | null = null;
+    let numeric: number | null = null;
+    for (const r of candidates) {
+      if (r == null) continue;
+      if (typeof r === 'number' || typeof r === 'string') {
+        const n = typeof r === 'number' ? r : parseInt(String(r), 10);
+        if (Number.isFinite(n)) {
+          numeric = n;
+          break;
+        }
+      } else if (typeof r === 'object') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rObj = r as Record<string, any>;
+        const id = rObj.id ?? rObj.rating ?? rObj.controller;
+        if (id != null) {
+          const n = typeof id === 'number' ? id : parseInt(String(id), 10);
+          if (Number.isFinite(n)) numeric = n;
+        }
+        ratingShort = (rObj.short || rObj.short_name || ratingShort) as
+          | string
+          | null;
+        ratingLong = (rObj.long || rObj.long_name || ratingLong) as
+          | string
+          | null;
+        if (numeric != null || ratingShort || ratingLong) break;
+      }
+    }
+    const fallbackShort =
+      ratingShort ||
+      (numeric != null ? VATSIM_RATINGS[numeric]?.short || null : null);
+
+    const { updateVatsimAccount } = await import('../db/users.js');
+    await updateVatsimAccount(userId, {
+      vatsimCid: cid || '',
+      ratingId: Number.isFinite(numeric) ? (numeric as number) : 0,
+      ratingShort: fallbackShort || undefined,
+      ratingLong: ratingLong || undefined,
+    });
+
+    posthog.identify({
+      distinctId: userId,
+      properties: {
+        has_vatsim: true,
+        vatsim_cid: cid,
+        vatsim_rating: fallbackShort,
+        vatsim_rating_long: ratingLong,
+      },
+    });
+    capture(req, {
+      distinctId: userId,
+      event: 'vatsim_linked',
+      properties: { vatsim_cid: cid, rating_short: fallbackShort },
+    });
+
+    res.redirect(FRONTEND_URL + '/settings?vatsim_linked=true');
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      console.error(
+        'VATSIM link error (callback):',
+        error.response?.data || error.message
+      );
+    } else if (error instanceof Error) {
+      console.error('VATSIM link error (callback):', error.message);
+    } else {
+      console.error('VATSIM link error (callback):', error);
+    }
+    res.redirect(FRONTEND_URL + '/settings?error=vatsim_auth_failed');
+  }
+});
+
+// POST: /api/auth/vatsim/exchange - exchange code to link account
+router.post('/vatsim/exchange', authLimiter, requireAuth, async (req, res) => {
+  try {
+    const code = typeof req.body.code === 'string' ? req.body.code : '';
+    const state = typeof req.body.state === 'string' ? req.body.state : '';
+    if (!code || !state) {
+      return res.status(400).json({ error: 'Missing code or state' });
+    }
+    let decoded: { userId?: string };
+    try {
+      decoded = jwt.verify(state, JWT_SECRET as string) as { userId?: string };
+    } catch {
+      return res.status(400).json({ error: 'Invalid state' });
+    }
+    if (!decoded || decoded.userId !== req.user?.userId) {
+      return res.status(400).json({ error: 'State/user mismatch' });
+    }
+    if (!VATSIM_CLIENT_ID || !VATSIM_CLIENT_SECRET || !VATSIM_REDIRECT_URI) {
+      return res.status(500).json({ error: 'VATSIM OAuth not configured' });
+    }
+
+    const basic = Buffer.from(
+      `${VATSIM_CLIENT_ID}:${VATSIM_CLIENT_SECRET}`
+    ).toString('base64');
+    const tokenResponse = await axios.post(
+      `${VATSIM_AUTH_BASE.replace(/\/$/, '')}/oauth/token`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        redirect_uri: String(VATSIM_REDIRECT_URI),
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+          Authorization: `Basic ${basic}`,
+        },
+      }
+    );
+    const { access_token } = tokenResponse.data || {};
+    if (!access_token) {
+      return res.status(500).json({ error: 'Failed to retrieve VATSIM token' });
+    }
+    const userResponse = await axios.get(
+      `${VATSIM_AUTH_BASE.replace(/\/$/, '')}/api/user`,
+      {
+        headers: { Authorization: `Bearer ${access_token}` },
+      }
+    );
+    const payload = userResponse.data || {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const root: Record<string, any> = payload.data || payload.user || payload;
+    const cid = String(root?.cid ?? root?.id ?? '');
+    const candidates2 = [
+      root?.rating?.controller,
+      root?.ratings?.controller,
+      root?.ratings?.atc,
+      root?.controller_rating,
+      root?.controller,
+      root?.rating,
+      root?.vatsim?.rating,
+      root?.vatsim?.ratings?.controller,
+    ].filter(Boolean);
+    let ratingShort2: string | null = null;
+    let ratingLong2: string | null = null;
+    let numeric2: number | null = null;
+    for (const r of candidates2) {
+      if (r == null) continue;
+      if (typeof r === 'number' || typeof r === 'string') {
+        const n = typeof r === 'number' ? r : parseInt(String(r), 10);
+        if (Number.isFinite(n)) {
+          numeric2 = n;
+          break;
+        }
+      } else if (typeof r === 'object') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rObj = r as Record<string, any>;
+        const id = rObj.id ?? rObj.rating ?? rObj.controller;
+        if (id != null) {
+          const n = typeof id === 'number' ? id : parseInt(String(id), 10);
+          if (Number.isFinite(n)) numeric2 = n;
+        }
+        ratingShort2 = (rObj.short || rObj.short_name || ratingShort2) as
+          | string
+          | null;
+        ratingLong2 = (rObj.long || rObj.long_name || ratingLong2) as
+          | string
+          | null;
+        if (numeric2 != null || ratingShort2 || ratingLong2) break;
+      }
+    }
+    const fallbackShort =
+      ratingShort2 ||
+      (numeric2 != null ? VATSIM_RATINGS[numeric2]?.short || null : null);
+
+    const { updateVatsimAccount } = await import('../db/users.js');
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    await updateVatsimAccount(req.user.userId, {
+      vatsimCid: cid || '',
+      ratingId: Number.isFinite(numeric2) ? (numeric2 as number) : 0,
+      ratingShort: fallbackShort || undefined,
+      ratingLong: ratingLong2 || undefined,
+    });
+    posthog.identify({
+      distinctId: req.user.userId,
+      properties: {
+        has_vatsim: true,
+        vatsim_cid: cid,
+        vatsim_rating: fallbackShort,
+        vatsim_rating_long: ratingLong2,
+      },
+    });
+    capture(req, {
+      distinctId: req.user.userId,
+      event: 'vatsim_linked',
+      properties: { vatsim_cid: cid, rating_short: fallbackShort },
+    });
+    res.json({
+      success: true,
+      vatsimCid: cid,
+      ratingShort: fallbackShort,
+      ratingLong: ratingLong2,
+    });
+  } catch (error) {
+    if (error instanceof AxiosError) {
+      console.error(
+        'VATSIM link error:',
+        error.response?.data || error.message
+      );
+    } else if (error instanceof Error) {
+      console.error('VATSIM link error:', error.message);
+    } else {
+      console.error('VATSIM link error:', error);
+    }
+    res.status(500).json({ error: 'VATSIM link failed' });
+  }
+});
+
+// POST: /api/auth/vatsim/unlink - unlink
+router.post('/vatsim/unlink', requireAuth, async (req, res) => {
+  try {
+    const { unlinkVatsimAccount } = await import('../db/users.js');
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    await unlinkVatsimAccount(req.user.userId);
+    posthog.identify({
+      distinctId: req.user.userId,
+      properties: {
+        has_vatsim: false,
+        vatsim_cid: null,
+        vatsim_rating: null,
+        vatsim_rating_long: null,
+      },
+    });
+    capture(req, { distinctId: req.user.userId, event: 'vatsim_unlinked' });
+    res.cookie('vatsim_force', '1', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 5 * 60 * 1000,
+      path: '/',
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error unlinking VATSIM:', error);
+    res.status(500).json({ error: 'Failed to unlink VATSIM account' });
+  }
+});
+
+// POST: /api/auth/vatsim/refresh - re-sync rating from VATSIM's public API
+router.post('/vatsim/refresh', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const result = await refreshVatsimRatingManually(req.user.userId);
+    if (!result.ok) {
+      const status =
+        result.reason === 'not_linked'
+          ? 400
+          : result.reason === 'cooldown'
+            ? 429
+            : 502;
+      return res.status(status).json({ error: result.reason });
+    }
+    res.json({
+      success: true,
+      changed: result.changed,
+      vatsimCid: result.cid,
+      ratingId: result.ratingId,
+      ratingShort: result.ratingShort,
+      ratingLong: result.ratingLong,
+    });
+  } catch (error) {
+    console.error('Error refreshing VATSIM rating:', error);
+    res.status(500).json({ error: 'Failed to refresh VATSIM rating' });
+  }
+});
+
+// PUT: /api/auth/tutorial - update tutorial completion status
+router.put('/tutorial', requireAuth, async (req, res) => {
+  try {
+    const { completed } = req.body;
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    await updateTutorialStatus(req.user.userId, completed);
+    if (completed) {
+      posthog.identify({
+        distinctId: req.user.userId,
+        properties: { tutorial_completed: true },
+      });
+      capture(req, {
+        distinctId: req.user.userId,
+        event: 'tutorial_completed',
+      });
+    }
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to update tutorial status' });
+  }
+});
+
+// GET: /api/auth/me - get current user info
+router.get('/me', requireAuthSoft, async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const user = await getUserById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const ip = getClientIp(req);
+    const validIp = ip && ip !== 'unknown' ? ip : null;
+
+    let isBanned = false;
+    try {
+      const userBanCacheKey = `ban:${req.user.userId}`;
+      const cachedUserBan = await redisConnection.get(userBanCacheKey);
+      if (cachedUserBan === '1') {
+        isBanned = true;
+      } else {
+        const userBanRecord = await isUserBanned(req.user.userId);
+        if (userBanRecord) {
+          isBanned = true;
+          await redisConnection.setex(userBanCacheKey, BAN_CACHE_TTL, '1');
+        } else if (validIp) {
+          const ipBanCacheKey = `ban:ip:${validIp}`;
+          const cachedIpBan = await redisConnection.get(ipBanCacheKey);
+          if (cachedIpBan === '1') {
+            isBanned = true;
+          } else {
+            const ipBanRecord = await isIpBanned(validIp);
+            if (ipBanRecord) {
+              isBanned = true;
+              await redisConnection.setex(ipBanCacheKey, BAN_CACHE_TTL, '1');
+            }
+          }
+        }
+      }
+    } catch {
+      const userBanRecord = await isUserBanned(req.user.userId);
+      if (userBanRecord) {
+        isBanned = true;
+      } else if (validIp) {
+        const ipBanRecord = await isIpBanned(validIp);
+        isBanned = !!ipBanRecord;
+      }
+    }
+
+    // Return immediately for banned users — skip VPN checks and rank queries
+    // so the response isn't delayed by external API calls.
+    if (isBanned) {
+      return res.json({
+        userId: req.user.userId,
+        username: req.user.username,
+        discriminator: req.user.discriminator,
+        avatar: req.user.avatar
+          ? `https://cdn.discordapp.com/avatars/${req.user.userId}/${req.user.avatar}.png`
+          : null,
+        settings: user.settings || {},
+        lastLogin: user.lastLogin,
+        totalSessionsCreated: user.totalSessionsCreated || 0,
+        isAdmin: isAdmin(req.user.userId),
+        isBanned: true,
+        isVpnBlocked: false,
+        isTester: false,
+        roleId: user.roleId,
+        roleName: user.roleName,
+        rolePermissions: user.role_permissions || {},
+        robloxUserId: user.roblox_user_id,
+        robloxUsername: user.roblox_username,
+        vatsimCid: user.vatsim_cid,
+        vatsimRatingId: user.vatsim_rating_id,
+        vatsimRatingShort: user.vatsim_rating_short,
+        vatsimRatingLong: user.vatsim_rating_long,
+        statistics: user.statistics || {},
+        ranks: {},
+      });
+    }
+
+    const vpnGateEnabled = await isVpnGateEnabled();
+    const isCurrentlyVpn =
+      !!user.is_vpn || (vpnGateEnabled && (await isVpnRequest(req)));
+    const isVpnBlocked =
+      vpnGateEnabled &&
+      isCurrentlyVpn &&
+      !(await isVpnException(req.user.userId));
+
+    // Return immediately for VPN-blocked users — skip rank queries.
+    if (isVpnBlocked) {
+      return res.json({
+        userId: req.user.userId,
+        username: req.user.username,
+        discriminator: req.user.discriminator,
+        avatar: req.user.avatar
+          ? `https://cdn.discordapp.com/avatars/${req.user.userId}/${req.user.avatar}.png`
+          : null,
+        settings: user.settings || {},
+        lastLogin: user.lastLogin,
+        totalSessionsCreated: user.totalSessionsCreated || 0,
+        isAdmin: isAdmin(req.user.userId),
+        isBanned: false,
+        isVpnBlocked: true,
+        isTester: false,
+        roleId: user.roleId,
+        roleName: user.roleName,
+        rolePermissions: user.role_permissions || {},
+        robloxUserId: user.roblox_user_id,
+        robloxUsername: user.roblox_username,
+        vatsimCid: user.vatsim_cid,
+        vatsimRatingId: user.vatsim_rating_id,
+        vatsimRatingShort: user.vatsim_rating_short,
+        vatsimRatingLong: user.vatsim_rating_long,
+        statistics: user.statistics || {},
+        ranks: {},
+      });
+    }
+
+    if (user.vatsim_cid) {
+      void refreshVatsimRatingIfStale(req.user.userId);
+    }
+
+    const [planState, limits] = await Promise.all([
+      getPlanState(req.user.userId),
+      getPlanLimits(req.user.userId),
+    ]);
+    let settings = user.settings || {};
+    if (hasLapsedAnimatedBackground(settings, limits)) {
+      const reverted = await updateUserSettings(req.user.userId, {
+        backgroundImage: {
+          ...settings.backgroundImage,
+          selectedImage: null,
+          useCustomBackground: false,
+        },
+      });
+      settings = reverted?.settings ?? settings;
+    }
+    const ranks: Record<string, number | null> = {};
+    for (const key of STATS_KEYS) {
+      ranks[key] = await getUserRank(req.user.userId, key);
+    }
+
+    res.json({
+      userId: req.user.userId,
+      username: req.user.username,
+      discriminator: req.user.discriminator,
+      avatar: req.user.avatar
+        ? `https://cdn.discordapp.com/avatars/${req.user.userId}/${req.user.avatar}.png`
+        : null,
+      settings,
+      lastLogin: user.lastLogin,
+      totalSessionsCreated: user.totalSessionsCreated || 0,
+      isAdmin: isAdmin(req.user.userId),
+      isBanned,
+      isVpnBlocked,
+      isTester: await isTester(req.user.userId),
+      plan: planState.plan,
+      earlyAccess: planAtLeast(planState.plan, 'supporter'),
+      limits,
+      roleId: user.roleId,
+      roleName: user.roleName,
+      rolePermissions: user.role_permissions || {},
+      robloxUserId: user.roblox_user_id,
+      robloxUsername: user.roblox_username,
+      vatsimCid: user.vatsim_cid,
+      vatsimRatingId: user.vatsim_rating_id,
+      vatsimRatingShort: user.vatsim_rating_short,
+      vatsimRatingLong: user.vatsim_rating_long,
+      statistics: user.statistics || {},
+      ranks,
+    });
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to fetch user',
+    });
+  }
+});
+
+// PUT: /api/auth/me - update current user settings
+router.put('/me', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    const { settings } = req.body;
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ error: 'Invalid settings payload' });
+    }
+
+    if ('bio' in settings) {
+      if (typeof settings.bio !== 'string') {
+        return res.status(400).json({ error: 'Bio must be a string' });
+      }
+      if (settings.bio.length > BIO_MAX_LENGTH) {
+        return res.status(400).json({
+          error: `Bio must be ${BIO_MAX_LENGTH} characters or fewer`,
+        });
+      }
+      const newlineCount = (settings.bio.match(/\n/g) || []).length;
+      if (newlineCount > BIO_MAX_LINES - 1) {
+        return res.status(400).json({
+          error: `Bio can have at most ${BIO_MAX_LINES} lines`,
+        });
+      }
+    }
+
+    const updatedUser = await updateUserSettings(req.user.userId, settings);
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    capture(req, { distinctId: req.user.userId, event: 'settings_updated' });
+
+    res.json({
+      userId: req.user.userId,
+      username: req.user.username,
+      discriminator: req.user.discriminator,
+      avatar: req.user.avatar
+        ? `https://cdn.discordapp.com/avatars/${req.user.userId}/${req.user.avatar}.png`
+        : null,
+      isAdmin: req.user.isAdmin,
+      settings: updatedUser.settings,
+      lastLogin: updatedUser.lastLogin,
+      totalSessionsCreated: updatedUser.totalSessionsCreated || 0,
+    });
+  } catch (error) {
+    console.error('Error updating user settings:', error);
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// POST: /api/auth/fingerprint - store browser fingerprint and check against ban list
+router.post('/fingerprint', requireAuthSoft, async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { visitorId } = req.body;
+  if (
+    !visitorId ||
+    typeof visitorId !== 'string' ||
+    visitorId.length < 8 ||
+    visitorId.length > 255
+  ) {
+    return res.status(400).json({ error: 'Invalid visitorId' });
+  }
+
+  try {
+    await updateUserFingerprint(req.user.userId, visitorId);
+
+    const fpToken = jwt.sign({ visitorId }, JWT_SECRET as string, {
+      expiresIn: '7d',
+    });
+    res.cookie('fp_token', fpToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7d, matches JWT
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Error processing fingerprint:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to process login',
+    });
+  }
+});
+
+// GET: /api/auth/platform-identity - minimal cross-subdomain identity lookup
+router.get('/platform-identity', requirePlatformIdentity, (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!req.platformIdentity)
+    return res.status(401).json({ error: 'Unauthorized' });
+  const {
+    userId,
+    username,
+    discriminator,
+    avatar,
+    isAdmin: admin,
+  } = req.platformIdentity;
+  res.json({ userId, username, discriminator, avatar, isAdmin: admin });
+});
+
+// POST: /api/auth/logout - log out user
+router.post('/logout', (req, res) => {
+  const token = req.cookies?.auth_token;
+  if (token && JWT_SECRET) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId?: string };
+      if (decoded?.userId)
+        capture(req, { distinctId: decoded.userId, event: 'user_logged_out' });
+    } catch {
+      /* invalid token, skip */
+    }
+  }
+  res.clearCookie('auth_token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    path: '/',
+  });
+  res.clearCookie('platform_token', platformTokenCookieOptions);
+  res.json({ message: 'Logged out successfully' });
+});
+
+// DELETE: /api/auth/delete-account - permanently delete user account
+router.delete('/delete-account', requireAuth, async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const userId = req.user.userId;
+    const user = await getUserById(userId);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.sessions && Array.isArray(user.sessions)) {
+      const { deleteSession } = await import('../db/sessions.js');
+      for (const sessionId of user.sessions) {
+        try {
+          await deleteSession(sessionId);
+        } catch (error) {
+          console.error(`Failed to delete session ${sessionId}:`, error);
+        }
+      }
+    }
+
+    const { deleteUser } = await import('../db/users.js');
+    await deleteUser(userId);
+
+    capture(req, { distinctId: userId, event: 'account_deleted' });
+
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+    });
+    res.clearCookie('platform_token', platformTokenCookieOptions);
+
+    res.json({ message: 'Account deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting account:', error);
+    res.status(500).json({ error: 'Failed to delete account' });
+  }
+});
+
+export default router;

@@ -1,0 +1,124 @@
+import express from 'express';
+import { createAuditLogger } from '../../middleware/auditLogger.js';
+import { requirePermission } from '../../middleware/rolePermissions.js';
+import { logAdminAction } from '../../db/audit.js';
+import {
+  getFeedbackPaginated,
+  deleteFeedback,
+  getFeedbackStats,
+} from '../../db/feedback.js';
+import { getClientIp } from '../../utils/getIpAddress.js';
+import { getSiteSettings, updateSiteSettings } from '../../db/siteSettings.js';
+
+const router = express.Router();
+
+router.use(requirePermission('feedback'));
+
+// GET: /api/admin/feedback - Get paginated feedback
+router.get(
+  '/',
+  createAuditLogger('ADMIN_FEEDBACK_ACCESSED'),
+  async (req, res) => {
+    try {
+      const page = Math.max(
+        1,
+        parseInt(String(req.query.page ?? '1'), 10) || 1
+      );
+      const limit = Math.min(
+        100,
+        Math.max(1, parseInt(String(req.query.limit ?? '25'), 10) || 25)
+      );
+      const search =
+        typeof req.query.search === 'string' ? req.query.search : '';
+      const ratingParam = req.query.rating;
+      const rating =
+        typeof ratingParam === 'string' && ratingParam !== ''
+          ? parseInt(ratingParam, 10)
+          : undefined;
+      const withText = req.query.withText === 'true';
+
+      const result = await getFeedbackPaginated({
+        page,
+        limit,
+        search,
+        rating,
+        withText,
+      });
+      res.json(result);
+    } catch (error) {
+      console.error('Error fetching feedback:', error);
+      res.status(500).json({ error: 'Failed to fetch feedback' });
+    }
+  }
+);
+
+// GET: /api/admin/feedback/stats - Get feedback statistics
+router.get('/stats', async (_req, res) => {
+  try {
+    const stats = await getFeedbackStats();
+    res.json(stats);
+  } catch (error) {
+    console.error('Error fetching feedback stats:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback stats' });
+  }
+});
+
+router.get('/banner', async (_req, res) => {
+  try {
+    const { feedbackBannerEnabled } = await getSiteSettings();
+    res.json({ enabled: feedbackBannerEnabled });
+  } catch (error) {
+    console.error('Error fetching feedback banner setting:', error);
+    res.status(500).json({ error: 'Failed to fetch feedback banner setting' });
+  }
+});
+
+router.patch(
+  '/banner',
+  createAuditLogger('FEEDBACK_BANNER_UPDATED'),
+  async (req, res) => {
+    try {
+      const { enabled } = req.body ?? {};
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'enabled must be a boolean' });
+      }
+      const { feedbackBannerEnabled } = await updateSiteSettings({
+        feedbackBannerEnabled: enabled,
+      });
+      res.json({ enabled: feedbackBannerEnabled });
+    } catch (error) {
+      console.error('Error updating feedback banner setting:', error);
+      res
+        .status(500)
+        .json({ error: 'Failed to update feedback banner setting' });
+    }
+  }
+);
+
+// DELETE: /api/admin/feedback/:id - Delete feedback
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const numericId = Number(id);
+
+    const feedback = await deleteFeedback(numericId);
+
+    if (req.user?.userId) {
+      const ip = getClientIp(req);
+      await logAdminAction({
+        adminId: req.user.userId,
+        adminUsername: req.user.username || 'Unknown',
+        actionType: 'FEEDBACK_DELETED',
+        ipAddress: Array.isArray(ip) ? ip.join(', ') : ip,
+        details: { message: `Deleted feedback with ID: ${numericId}` },
+      });
+    }
+
+    res.json(feedback);
+  } catch (error) {
+    console.error('Error deleting feedback:', error);
+    res.status(500).json({ error: 'Failed to delete feedback' });
+  }
+});
+
+export default router;

@@ -1,0 +1,1295 @@
+import { mainDb } from './connection.js';
+import {
+  validateSessionId,
+  validateFlightId,
+  validateCallsign,
+} from '../utils/validation.js';
+// Update 9: unused while server-side route validation is disabled below.
+// import { validateRoute } from '../utils/routeValidation.js';
+import { getSessionById } from './sessions.js';
+import { getUserById } from './users.js';
+import {
+  generateRandomId,
+  generateSID,
+  generateSquawk,
+  getWakeTurbulence,
+} from '../utils/flightUtils.js';
+import crypto from 'crypto';
+import { sql } from 'kysely';
+import { incrementStat } from '../utils/statisticsCache.js';
+import type { FlightsTable } from './types/connection/main/FlightsTable.js';
+function createUTCDate(): Date {
+  const now = new Date();
+  return new Date(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      now.getUTCHours(),
+      now.getUTCMinutes(),
+      now.getUTCSeconds(),
+      now.getUTCMilliseconds()
+    )
+  );
+}
+
+function normalizeClearance(value: unknown): 'true' | 'false' {
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'string')
+    return value.toLowerCase() === 'true' ? 'true' : 'false';
+  return 'false';
+}
+
+function clearanceToBoolean(value: unknown): boolean {
+  return value === 'true' || value === true;
+}
+
+export interface SnapImage {
+  cephie_id: string;
+  url: string;
+}
+
+export interface ClientFlight {
+  id: string;
+  session_id: string;
+  callsign?: string;
+  aircraft?: string;
+  flight_type?: string;
+  departure?: string;
+  arrival?: string;
+  alternate?: string;
+  route?: string;
+  sid?: string;
+  star?: string;
+  runway?: string;
+  cruisingFL?: string;
+  clearedFL?: string;
+  stand?: string;
+  gate?: string;
+  remark?: string;
+  flight_plan_time?: string;
+  created_at?: Date;
+  updated_at?: Date;
+  status?: string;
+  clearance?: boolean;
+  position?: object;
+  squawk?: string;
+  wtc?: string;
+  hidden?: boolean;
+  pdc_remarks?: string;
+  notes?: string;
+  acars_token?: string;
+  snap_images?: SnapImage[];
+  featured_on_profile?: boolean;
+  isPFATC?: boolean;
+  user?: {
+    id: string;
+    discord_username: string;
+    discord_avatar_url: string | null;
+  };
+}
+
+export function sanitizeFlightForClient(flight: FlightsTable): ClientFlight {
+  const {
+    user_id: _uid,
+    ip_address: _ip,
+    acars_token: _tok,
+    cruisingfl,
+    clearedfl,
+    clearance,
+    ...rest
+  } = flight;
+  return {
+    ...rest,
+    cruisingFL: cruisingfl,
+    clearedFL: clearedfl,
+    clearance: clearanceToBoolean(clearance),
+  };
+}
+
+function sanitizeFlightForOwner(
+  flight: FlightsTable
+): ClientFlight & { acars_token?: string } {
+  const {
+    user_id: _uid,
+    ip_address: _ip,
+    cruisingfl,
+    clearedfl,
+    clearance,
+    ...rest
+  } = flight;
+  return {
+    ...rest,
+    cruisingFL: cruisingfl,
+    clearedFL: clearedfl,
+    clearance: clearanceToBoolean(clearance),
+  };
+}
+
+function validateFlightFields(updates: Partial<FlightsTable>) {
+  if (typeof updates.callsign === 'string' && updates.callsign.length > 16) {
+    throw new Error('Callsign must be 16 characters or less');
+  }
+  if (typeof updates.callsign === 'string' && updates.callsign.length > 0) {
+    if (!/\d/.test(updates.callsign)) {
+      throw new Error('Callsign must contain at least one number');
+    }
+  }
+  if (typeof updates.stand === 'string' && updates.stand.length > 8) {
+    throw new Error('Stand must be 8 characters or less');
+  }
+  if (typeof updates.squawk === 'string') {
+    const squawk = updates.squawk;
+    if (squawk.length > 0 && (squawk.length > 4 || !/^\d{1,4}$/.test(squawk))) {
+      throw new Error('Squawk must be up to 4 numeric digits');
+    }
+  }
+  if (typeof updates.remark === 'string' && updates.remark.length > 50) {
+    throw new Error('Remark must be 50 characters or less');
+  }
+  if (updates.cruisingfl !== undefined) {
+    const fl = parseInt(String(updates.cruisingfl), 10);
+    if (isNaN(fl) || fl < 0 || fl > 500 || fl % 5 !== 0) {
+      throw new Error(
+        'Cruising FL must be between 0 and 500 in 5-step increments'
+      );
+    }
+  }
+  if (updates.clearedfl !== undefined) {
+    const fl = parseInt(String(updates.clearedfl), 10);
+    if (isNaN(fl) || fl < 0 || fl > 500 || fl % 5 !== 0) {
+      throw new Error(
+        'Cleared FL must be between 0 and 500 in 5-step increments'
+      );
+    }
+  }
+}
+
+export async function getFlightsBySessionForDeveloperApi(sessionId: string) {
+  const validSessionId = validateSessionId(sessionId);
+  try {
+    const flights = await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('session_id', '=', validSessionId)
+      .orderBy('created_at', 'asc')
+      .execute();
+    return flights.map((flight) => sanitizeFlightForClient(flight));
+  } catch (error) {
+    console.error('Error fetching flights (developer API):', error);
+    return [];
+  }
+}
+
+export async function getFlightsBySession(sessionId: string) {
+  const validSessionId = validateSessionId(sessionId);
+
+  try {
+    const flights = await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('session_id', '=', validSessionId)
+      .orderBy('created_at', 'asc')
+      .execute();
+
+    const userIds = [
+      ...new Set(
+        flights
+          .map((f) => f.user_id)
+          .filter((id): id is string => typeof id === 'string')
+      ),
+    ];
+
+    const usersMap = new Map<
+      string,
+      {
+        id: string;
+        discord_username: string;
+        discord_avatar_url: string | null;
+      }
+    >();
+
+    if (userIds.length > 0) {
+      try {
+        const users = await mainDb
+          .selectFrom('users')
+          .select([
+            'id',
+            'username as discord_username',
+            'avatar as discord_avatar_url',
+          ])
+          .where('id', 'in', userIds)
+          .execute();
+
+        users.forEach((user) => {
+          usersMap.set(user.id, {
+            id: user.id,
+            discord_username: user.discord_username,
+            discord_avatar_url: user.discord_avatar_url
+              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.discord_avatar_url}.png`
+              : null,
+          });
+        });
+      } catch (userError) {
+        console.error('Error fetching user data:', userError);
+      }
+    }
+
+    return flights.map((flight) => ({
+      ...sanitizeFlightForClient(flight),
+      user: flight.user_id ? usersMap.get(flight.user_id) : undefined,
+    }));
+  } catch (error) {
+    console.error('Error fetching flights:', error);
+    return [];
+  }
+}
+
+export async function getFlightsByUser(userId: string) {
+  try {
+    const flights = await mainDb
+      .selectFrom('flights')
+      .leftJoin('sessions', 'sessions.session_id', 'flights.session_id')
+      .select([
+        'flights.id',
+        'flights.session_id',
+        'flights.user_id',
+        'flights.ip_address',
+        'flights.callsign',
+        'flights.aircraft',
+        'flights.flight_type',
+        'flights.departure',
+        'flights.arrival',
+        'flights.alternate',
+        'flights.route',
+        'flights.sid',
+        'flights.star',
+        'flights.runway',
+        'flights.clearedfl',
+        'flights.cruisingfl',
+        'flights.stand',
+        'flights.gate',
+        'flights.remark',
+        'flights.flight_plan_time',
+        'flights.status',
+        'flights.clearance',
+        'flights.position',
+        'flights.squawk',
+        'flights.wtc',
+        'flights.hidden',
+        'flights.acars_token',
+        'flights.pdc_remarks',
+        'flights.notes',
+        'flights.snap_images',
+        'flights.featured_on_profile',
+        'flights.created_at',
+        'flights.updated_at',
+        'sessions.is_pfatc',
+        'sessions.is_advanced_atc',
+      ])
+      .where('flights.user_id', '=', userId)
+      .orderBy('flights.created_at', 'desc')
+      .execute();
+
+    return flights.map((flight) => ({
+      ...sanitizeFlightForOwner(flight as unknown as FlightsTable),
+      isPFATC: flight.is_pfatc ?? false,
+      isAdvancedATC: flight.is_advanced_atc ?? false,
+    }));
+  } catch (error) {
+    console.error(`Error fetching flights for user ${userId}:`, error);
+    return [];
+  }
+}
+
+export async function getFlightByIdForUser(userId: string, flightId: string) {
+  try {
+    const validFlightId = validateFlightId(flightId);
+    const flight = await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('id', '=', validFlightId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    return flight ? sanitizeFlightForOwner(flight) : null;
+  } catch (error) {
+    console.error(
+      `Error fetching flight ${flightId} for user ${userId}:`,
+      error
+    );
+    return null;
+  }
+}
+
+export async function getFlightLogsForUser(userId: string, flightId: string) {
+  try {
+    const validFlightId = validateFlightId(flightId);
+
+    const ownedFlight = await mainDb
+      .selectFrom('flights')
+      .select(['id', 'created_at', 'user_id'])
+      .where('id', '=', validFlightId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    if (!ownedFlight) {
+      return { logs: [], logsDiscardedDueToAge: false };
+    }
+
+    const retentionThreshold = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+    const logsDiscardedDueToAge = !!(
+      ownedFlight.created_at && ownedFlight.created_at < retentionThreshold
+    );
+
+    const logs = await mainDb
+      .selectFrom('flight_logs')
+      .leftJoin('users', 'users.id', 'flight_logs.user_id')
+      .select([
+        'flight_logs.id',
+        'flight_logs.action',
+        'flight_logs.old_data',
+        'flight_logs.new_data',
+        'flight_logs.created_at',
+        'flight_logs.username',
+        'flight_logs.user_id',
+        'users.avatar as user_avatar_hash',
+      ])
+      .where('flight_logs.flight_id', '=', validFlightId)
+      .orderBy('flight_logs.created_at', 'desc')
+      .execute();
+
+    return {
+      logs: logs.map((log) => ({
+        id: log.id,
+        action: log.action,
+        old_data: log.old_data,
+        new_data: log.new_data,
+        created_at: log.created_at,
+        username: log.username,
+        user_id: log.user_id,
+        avatar_url: log.user_avatar_hash
+          ? `https://cdn.discordapp.com/avatars/${log.user_id}/${log.user_avatar_hash}.png`
+          : null,
+      })),
+      logsDiscardedDueToAge,
+      pilotUserId: ownedFlight.user_id,
+    };
+  } catch (error) {
+    console.error(
+      `Error fetching flight logs for flight ${flightId} and user ${userId}:`,
+      error
+    );
+    return { logs: [], logsDiscardedDueToAge: false };
+  }
+}
+
+export async function claimFlightForUser(
+  sessionId: string,
+  flightId: string,
+  acarsToken: string,
+  userId: string
+) {
+  const validSessionId = validateSessionId(sessionId);
+  const validFlightId = validateFlightId(flightId);
+
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['id', 'user_id', 'acars_token'])
+    .where('session_id', '=', validSessionId)
+    .where('id', '=', validFlightId)
+    .executeTakeFirst();
+
+  if (!flight) return { ok: false, reason: 'not_found' as const };
+  if (flight.acars_token !== acarsToken)
+    return { ok: false, reason: 'invalid_token' as const };
+  if (flight.user_id && flight.user_id !== userId)
+    return { ok: false, reason: 'already_claimed' as const };
+
+  await mainDb
+    .updateTable('flights')
+    .set({
+      user_id: userId,
+      updated_at: createUTCDate(),
+    })
+    .where('session_id', '=', validSessionId)
+    .where('id', '=', validFlightId)
+    .execute();
+
+  return { ok: true as const };
+}
+
+export async function validateAcarsAccess(
+  sessionId: string,
+  flightId: string,
+  acarsToken: string
+) {
+  try {
+    const validSessionId = validateSessionId(sessionId);
+    const validFlightId = validateFlightId(flightId);
+
+    const result = await mainDb
+      .selectFrom('flights')
+      .select('acars_token')
+      .where('session_id', '=', validSessionId)
+      .where('id', '=', validFlightId)
+      .executeTakeFirst();
+
+    if (!result || result.acars_token !== acarsToken) {
+      return { valid: false };
+    }
+
+    return { valid: true };
+  } catch (error) {
+    console.error('Error validating ACARS access:', error);
+    return { valid: false };
+  }
+}
+
+export async function getFlightsBySessionWithTime(
+  sessionId: string,
+  hoursBack = 2
+) {
+  try {
+    const validSessionId = validateSessionId(sessionId);
+
+    const sinceDateUTC = createUTCDate();
+    sinceDateUTC.setUTCHours(sinceDateUTC.getUTCHours() - hoursBack);
+    const sinceIso = sinceDateUTC.toISOString();
+
+    const flights = await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('session_id', '=', validSessionId)
+      .where((eb) =>
+        eb.or([
+          eb('flight_plan_time', '>=', sinceIso),
+          eb('updated_at', '>=', sql<Date>`${sinceIso}`),
+          eb('created_at', '>=', sql<Date>`${sinceIso}`),
+        ])
+      )
+      .orderBy(
+        sql`COALESCE(flight_plan_time::timestamp, created_at, updated_at)`,
+        'desc'
+      )
+      .orderBy('callsign', 'asc')
+      .execute();
+
+    const userIds = [
+      ...new Set(
+        flights
+          .map((f) => f.user_id)
+          .filter((id): id is string => typeof id === 'string')
+      ),
+    ];
+
+    const usersMap = new Map<
+      string,
+      {
+        id: string;
+        discord_username: string;
+        discord_avatar_url: string | null;
+      }
+    >();
+
+    if (userIds.length > 0) {
+      try {
+        const users = await mainDb
+          .selectFrom('users')
+          .select([
+            'id',
+            'username as discord_username',
+            'avatar as discord_avatar_url',
+          ])
+          .where('id', 'in', userIds)
+          .execute();
+
+        users.forEach((user) => {
+          usersMap.set(user.id, {
+            id: user.id,
+            discord_username: user.discord_username,
+            discord_avatar_url: user.discord_avatar_url
+              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.discord_avatar_url}.png`
+              : null,
+          });
+        });
+      } catch (userError) {
+        console.error('Error fetching user data:', userError);
+      }
+    }
+
+    return flights.map((flight) => ({
+      ...sanitizeFlightForClient(flight),
+      user: flight.user_id ? usersMap.get(flight.user_id) : undefined,
+    }));
+  } catch (error) {
+    console.error(`Error fetching flights for session ${sessionId}:`, error);
+    return [];
+  }
+}
+
+export interface ExternalArrivalFlight extends ClientFlight {
+  sourceSessionId: string;
+  sourceAirport: string;
+  isExternal: true;
+}
+
+export async function getExternalArrivalFlights(
+  airportIcao: string,
+  networkKind: 'pfatc' | 'advanced_atc' | null
+): Promise<ExternalArrivalFlight[]> {
+  const { perfAsync } = await import('../realtime/perf.js');
+  return perfAsync(
+    'getExternalArrivalFlights',
+    () => getExternalArrivalFlightsUncached(airportIcao, networkKind),
+    { icao: airportIcao, network: networkKind ?? 'none' }
+  );
+}
+
+async function getExternalArrivalFlightsUncached(
+  airportIcao: string,
+  networkKind: 'pfatc' | 'advanced_atc' | null
+): Promise<ExternalArrivalFlight[]> {
+  if (!networkKind) return [];
+  if (
+    !airportIcao ||
+    airportIcao.length !== 4 ||
+    !/^[A-Z]{4}$/i.test(airportIcao)
+  ) {
+    throw new Error('Invalid ICAO airport code');
+  }
+  try {
+    const sinceDateUTC = createUTCDate();
+    sinceDateUTC.setUTCHours(sinceDateUTC.getUTCHours() - 2);
+    const sinceIso = sinceDateUTC.toISOString();
+    const icao = airportIcao.toUpperCase();
+
+    let query = mainDb
+      .selectFrom('flights as f')
+      .innerJoin('sessions as s', 's.session_id', 'f.session_id')
+      .selectAll('f')
+      .select([
+        sql<string>`s.session_id`.as('source_session_id'),
+        sql<string>`s.airport_icao`.as('source_airport'),
+      ])
+      .where('f.arrival', '=', icao)
+      .where('s.airport_icao', '!=', icao)
+      .where((eb) =>
+        eb.or([
+          eb('f.flight_plan_time', '>=', sinceIso),
+          eb('f.updated_at', '>=', sql<Date>`${sinceIso}`),
+          eb('f.created_at', '>=', sql<Date>`${sinceIso}`),
+        ])
+      );
+
+    if (networkKind === 'pfatc') {
+      query = query.where('s.is_pfatc', '=', true);
+    } else {
+      query = query.where('s.is_advanced_atc', '=', true);
+    }
+
+    const flights = await query.execute();
+
+    const userIds = [
+      ...new Set(
+        flights
+          .map((f) => f.user_id)
+          .filter((id): id is string => typeof id === 'string')
+      ),
+    ];
+
+    const usersMap = new Map<
+      string,
+      {
+        id: string;
+        discord_username: string;
+        discord_avatar_url: string | null;
+      }
+    >();
+
+    if (userIds.length > 0) {
+      try {
+        const users = await mainDb
+          .selectFrom('users')
+          .select([
+            'id',
+            'username as discord_username',
+            'avatar as discord_avatar_url',
+          ])
+          .where('id', 'in', userIds)
+          .execute();
+
+        users.forEach((user) => {
+          usersMap.set(user.id, {
+            id: user.id,
+            discord_username: user.discord_username,
+            discord_avatar_url: user.discord_avatar_url
+              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.discord_avatar_url}.png`
+              : null,
+          });
+        });
+      } catch (userError) {
+        console.error(
+          'Error fetching user data for external arrivals:',
+          userError
+        );
+      }
+    }
+
+    return flights.map((f): ExternalArrivalFlight => ({
+      ...sanitizeFlightForClient(f),
+      user: f.user_id ? usersMap.get(f.user_id) : undefined,
+      sourceSessionId: f.source_session_id,
+      sourceAirport: f.source_airport,
+      isExternal: true,
+    }));
+  } catch (error) {
+    console.error('Error fetching external arrival flights:', error);
+    return [];
+  }
+}
+
+export interface AddFlightData {
+  id?: string;
+  user_id?: string;
+  squawk?: string;
+  wtc?: string;
+  flight_plan_time?: string;
+  acars_token?: string;
+  aircraft_type?: string;
+  aircraft?: string;
+  departure?: string;
+  runway?: string;
+  sid?: string;
+  cruisingFL?: number;
+  clearedFL?: number;
+  cruisingfl?: number | string;
+  clearedfl?: number | string;
+  roblox_username?: string;
+  [key: string]: unknown;
+}
+
+export async function addFlight(
+  sessionId: string,
+  flightData: AddFlightData,
+  options?: {
+    countTowardStats?: boolean;
+    submitterUserId?: string;
+  }
+) {
+  const validSessionId = validateSessionId(sessionId);
+
+  // Airport/SID/STAR data is keyed uppercase; normalize so lookups aren't case-sensitive.
+  if (typeof flightData.departure === 'string') {
+    flightData.departure = flightData.departure.toUpperCase();
+  }
+  if (typeof flightData.arrival === 'string') {
+    flightData.arrival = flightData.arrival.toUpperCase();
+  }
+  if (typeof flightData.alternate === 'string') {
+    flightData.alternate = flightData.alternate.toUpperCase();
+  }
+
+  // No DB-level default for status; match the web UI's default of PENDING.
+  if (
+    typeof flightData.status !== 'string' ||
+    flightData.status.trim() === ''
+  ) {
+    flightData.status = 'PENDING';
+  }
+
+  if (
+    typeof flightData.flight_type !== 'string' ||
+    flightData.flight_type.trim() === ''
+  ) {
+    flightData.flight_type = 'IFR';
+  }
+
+  flightData.callsign = validateCallsign(flightData.callsign);
+
+  // Update 9: disabled — the fix database (waypointData.json) doesn't cover
+  // the new airport roster yet, so this would reject legitimate routes.
+  // Re-enable once waypoint data catches up.
+  // if (typeof flightData.route === 'string' && flightData.route.trim()) {
+  //   const routeError =
+  //     flightData.flight_type === 'VFR'
+  //       ? undefined
+  //       : validateRoute(
+  //           flightData.route,
+  //           flightData.departure,
+  //           typeof flightData.arrival === 'string'
+  //             ? flightData.arrival
+  //             : undefined
+  //         );
+  //   if (routeError) {
+  //     throw new Error(`Route error: ${routeError}`);
+  //   }
+  // }
+
+  flightData.clearance = normalizeClearance(flightData.clearance);
+
+  flightData.id = generateRandomId();
+  flightData.squawk = await generateSquawk(flightData);
+  flightData.wtc = await getWakeTurbulence(
+    flightData.aircraft || flightData.aircraft_type || ''
+  );
+  if (!flightData.flight_plan_time) {
+    flightData.flight_plan_time = new Date().toISOString();
+  }
+  flightData.acars_token = crypto.randomBytes(4).toString('hex');
+  flightData.updated_at = createUTCDate();
+
+  if (flightData.aircraft_type) {
+    flightData.aircraft = flightData.aircraft_type;
+    delete flightData.aircraft_type;
+  }
+
+  let sessionForDefaults: Awaited<ReturnType<typeof getSessionById>> = null;
+  if (!flightData.runway || !flightData.sid) {
+    try {
+      sessionForDefaults = await getSessionById(validSessionId);
+    } catch (error) {
+      console.error('Error fetching session for flight defaults:', error);
+    }
+  }
+
+  if (!flightData.runway && sessionForDefaults?.active_runway) {
+    flightData.runway = sessionForDefaults.active_runway;
+  }
+
+  if (!flightData.sid) {
+    if (!flightData.icao) {
+      flightData.icao =
+        (flightData.departure as string) ||
+        sessionForDefaults?.airport_icao ||
+        undefined;
+    }
+    try {
+      const sidResult = await generateSID(flightData);
+      flightData.sid = sidResult.sid;
+    } catch (error) {
+      console.error('Error generating SID for flight:', error);
+    }
+  }
+
+  if (flightData.cruisingFL !== undefined) {
+    flightData.cruisingfl = flightData.cruisingFL;
+    delete flightData.cruisingFL;
+  }
+  if (flightData.clearedFL !== undefined) {
+    flightData.clearedfl = flightData.clearedFL;
+    delete flightData.clearedFL;
+  }
+
+  let robloxLinked = false;
+  if (
+    options?.submitterUserId &&
+    typeof flightData.roblox_username === 'string' &&
+    flightData.roblox_username.trim()
+  ) {
+    const submitter = await getUserById(options.submitterUserId);
+    if (
+      submitter?.roblox_username &&
+      submitter.roblox_username === flightData.roblox_username
+    ) {
+      robloxLinked = true;
+    }
+  }
+  flightData.roblox_linked = robloxLinked;
+
+  // Strip non-column fields
+  const {
+    icao: _icao,
+    aircraft_type: _at,
+    ...insertData
+  } = flightData as Record<string, unknown>;
+
+  const result = await mainDb
+    .insertInto('flights')
+    .values({
+      session_id: validSessionId,
+      id: String(insertData.id ?? sql`gen_random_uuid()`),
+      ...Object.fromEntries(
+        Object.entries(insertData)
+          .filter(([k]) => k !== 'id')
+          .map(([k, v]) => {
+            if (
+              (k === 'cruisingfl' || k === 'clearedfl') &&
+              v !== undefined &&
+              v !== null
+            ) {
+              return [k, String(v)];
+            }
+            return [k, v];
+          })
+      ),
+    })
+    .returningAll()
+    .executeTakeFirst();
+
+  if (!result) throw new Error('Failed to insert flight');
+
+  if (flightData.user_id && (options?.countTowardStats ?? true)) {
+    incrementStat(
+      String(flightData.user_id),
+      'total_flights_submitted',
+      1,
+      'total'
+    );
+  }
+
+  const clientFlight = sanitizeFlightForClient(result);
+  void (async () => {
+    const { getSessionMeta } = await import('../realtime/activeSessions.js');
+    const { onFlightChanged } = await import('../realtime/invalidate.js');
+    const meta = await getSessionMeta(validSessionId);
+    void onFlightChanged({
+      sessionId: validSessionId,
+      flightId: result.id,
+      flight: clientFlight,
+      networkKind: meta?.networkKind ?? null,
+    });
+  })();
+
+  return sanitizeFlightForOwner(result);
+}
+
+export async function getFlightById(sessionId: string, flightId: string) {
+  const validSessionId = validateSessionId(sessionId);
+  const validFlightId = validateFlightId(flightId);
+
+  return (
+    (await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('session_id', '=', validSessionId)
+      .where('id', '=', validFlightId)
+      .executeTakeFirst()) ?? null
+  );
+}
+
+export async function getPublicFlightById(flightId: string) {
+  const validFlightId = validateFlightId(flightId);
+
+  const flight =
+    (await mainDb
+      .selectFrom('flights')
+      .selectAll()
+      .where('id', '=', validFlightId)
+      .executeTakeFirst()) ?? null;
+
+  // Only expose flights that have been submitted (have an acars_token)
+  if (!flight?.acars_token) return null;
+  return flight;
+}
+
+function toFlightColumn(key: string): string {
+  if (key === 'cruisingFL') return 'cruisingfl';
+  if (key === 'clearedFL') return 'clearedfl';
+  return key;
+}
+
+function isSameFlightValue(
+  column: string,
+  current: unknown,
+  next: unknown
+): boolean {
+  if (column === 'clearance')
+    return normalizeClearance(current) === normalizeClearance(next);
+  const isEmpty = (v: unknown) => v === null || v === undefined || v === '';
+  if (isEmpty(current) || isEmpty(next))
+    return isEmpty(current) && isEmpty(next);
+  if (current instanceof Date)
+    return new Date(next as string).getTime() === current.getTime();
+  if (
+    (column === 'departure' || column === 'arrival') &&
+    typeof next === 'string'
+  )
+    return next.toUpperCase() === current;
+  return current === next;
+}
+
+export function dropUnchangedFlightFields(
+  current: object | null | undefined,
+  updates: Record<string, unknown>
+): Record<string, unknown> {
+  if (!current) return updates;
+  const row = current as Record<string, unknown>;
+  const changed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    const column = toFlightColumn(key);
+    if (!(column in row) || !isSameFlightValue(column, row[column], value)) {
+      changed[key] = value;
+    }
+  }
+  return changed;
+}
+
+const allowedFlightUpdateColumns = new Set([
+  'callsign',
+  'aircraft',
+  'departure',
+  'arrival',
+  'flight_type',
+  'stand',
+  'gate',
+  'runway',
+  'sid',
+  'star',
+  'cruisingfl',
+  'clearedfl',
+  'squawk',
+  'wtc',
+  'status',
+  'remark',
+  'clearance',
+  'pdc_remarks',
+  'hidden',
+  'route',
+  'req_at',
+  'req_phase',
+  'roblox_username',
+]);
+
+export function getRejectedFlightUpdateFields(
+  updates: Record<string, unknown>
+): string[] {
+  return Object.keys(updates).filter(
+    (field) => !allowedFlightUpdateColumns.has(field)
+  );
+}
+
+export async function updateFlight(
+  sessionId: string,
+  flightId: string,
+  updates: Record<string, unknown>
+) {
+  const validSessionId = validateSessionId(sessionId);
+  const validFlightId = validateFlightId(flightId);
+
+  const dbUpdates: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    const dbKey = toFlightColumn(key);
+    if (allowedFlightUpdateColumns.has(dbKey)) {
+      if (
+        (dbKey === 'departure' || dbKey === 'arrival') &&
+        typeof value === 'string'
+      ) {
+        dbUpdates[dbKey] = value.toUpperCase();
+      } else {
+        dbUpdates[dbKey] =
+          dbKey === 'clearance' ? normalizeClearance(value) : value;
+      }
+    }
+  }
+
+  if ('roblox_username' in dbUpdates) {
+    dbUpdates.roblox_linked = false;
+  }
+
+  validateFlightFields(dbUpdates as Partial<FlightsTable>);
+
+  if (Object.keys(dbUpdates).length === 0) {
+    throw new Error('No valid fields to update');
+  }
+  dbUpdates.updated_at = createUTCDate();
+
+  const result = await mainDb
+    .updateTable('flights')
+    .set(dbUpdates)
+    .where('session_id', '=', validSessionId)
+    .where('id', '=', validFlightId)
+    .returningAll()
+    .executeTakeFirst();
+
+  if (!result) throw new Error('Flight not found or update failed');
+
+  const clientFlight = sanitizeFlightForClient(result);
+  void (async () => {
+    const { getSessionMeta } = await import('../realtime/activeSessions.js');
+    const { onFlightChanged } = await import('../realtime/invalidate.js');
+    const meta = await getSessionMeta(validSessionId);
+    void onFlightChanged({
+      sessionId: validSessionId,
+      flightId: validFlightId,
+      flight: clientFlight,
+      networkKind: meta?.networkKind ?? null,
+    });
+  })();
+
+  return clientFlight;
+}
+
+export async function deleteFlight(sessionId: string, flightId: string) {
+  const validSessionId = validateSessionId(sessionId);
+  const validFlightId = validateFlightId(flightId);
+
+  const existing = await getFlightById(validSessionId, validFlightId);
+
+  await mainDb
+    .deleteFrom('flights')
+    .where('session_id', '=', validSessionId)
+    .where('id', '=', validFlightId)
+    .execute();
+
+  if (existing) {
+    void (async () => {
+      const { getSessionMeta } = await import('../realtime/activeSessions.js');
+      const { onFlightChanged } = await import('../realtime/invalidate.js');
+      const meta = await getSessionMeta(validSessionId);
+      void onFlightChanged({
+        sessionId: validSessionId,
+        flightId: validFlightId,
+        flight: sanitizeFlightForClient(existing),
+        networkKind: meta?.networkKind ?? null,
+        deleted: true,
+      });
+    })();
+  }
+}
+
+export async function updateFlightNotes(
+  userId: string,
+  flightId: string,
+  notes: string
+) {
+  const validFlightId = validateFlightId(flightId);
+  await mainDb
+    .updateTable('flights')
+    .set({ notes, updated_at: createUTCDate() })
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .execute();
+}
+
+export async function countSnapImages(
+  userId: string,
+  flightId: string
+): Promise<number | null> {
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['snap_images'])
+    .where('id', '=', validateFlightId(flightId))
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!flight) return null;
+  return ((flight.snap_images as unknown[] | null) ?? []).length;
+}
+
+export async function addSnapImage(
+  userId: string,
+  flightId: string,
+  cephieId: string,
+  url: string,
+  maxSnaps: number
+): Promise<{
+  ok: boolean;
+  atCap?: boolean;
+  snap_images?: Array<{ cephie_id: string; url: string }>;
+}> {
+  const validFlightId = validateFlightId(flightId);
+
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['id', 'user_id', 'snap_images'])
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  if (!flight) return { ok: false };
+
+  const existing =
+    (flight.snap_images as Array<{ cephie_id: string; url: string }> | null) ??
+    [];
+  if (existing.length >= maxSnaps) return { ok: false, atCap: true };
+  const updated = [...existing, { cephie_id: cephieId, url }];
+
+  await mainDb
+    .updateTable('flights')
+    .set({
+      snap_images: sql`${JSON.stringify(updated)}::jsonb`,
+      updated_at: createUTCDate(),
+    })
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .execute();
+
+  return { ok: true, snap_images: updated };
+}
+
+export async function deleteSnapImage(
+  userId: string,
+  flightId: string,
+  cephieId: string
+): Promise<{ ok: boolean; cephie_id?: string }> {
+  const validFlightId = validateFlightId(flightId);
+
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['id', 'user_id', 'snap_images'])
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  if (!flight) return { ok: false };
+
+  const existing =
+    (flight.snap_images as Array<{ cephie_id: string; url: string }> | null) ??
+    [];
+  const target = existing.find((img) => img.cephie_id === cephieId);
+  if (!target) return { ok: false };
+
+  const updated = existing.filter((img) => img.cephie_id !== cephieId);
+
+  await mainDb
+    .updateTable('flights')
+    .set({
+      snap_images: sql`${JSON.stringify(updated)}::jsonb`,
+      updated_at: createUTCDate(),
+    })
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .execute();
+
+  return { ok: true, cephie_id: cephieId };
+}
+
+export async function toggleFeaturedOnProfile(
+  userId: string,
+  flightId: string,
+  maxFeatured: number
+): Promise<{ ok: boolean; atCap?: boolean; featured?: boolean }> {
+  const validFlightId = validateFlightId(flightId);
+
+  const flight = await mainDb
+    .selectFrom('flights')
+    .select(['id', 'user_id', 'featured_on_profile'])
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  if (!flight) return { ok: false };
+
+  const newValue = !flight.featured_on_profile;
+
+  if (newValue) {
+    const countRow = await mainDb
+      .selectFrom('flights')
+      .select((eb) => eb.fn.count<number>('id').as('count'))
+      .where('user_id', '=', userId)
+      .where('featured_on_profile', '=', true)
+      .executeTakeFirst();
+    if (Number(countRow?.count ?? 0) >= maxFeatured) {
+      return { ok: false, atCap: true };
+    }
+  }
+
+  await mainDb
+    .updateTable('flights')
+    .set({ featured_on_profile: newValue, updated_at: createUTCDate() })
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .execute();
+
+  return { ok: true, featured: newValue };
+}
+
+export async function adminUnfeatureFlight(
+  userId: string,
+  flightId: string
+): Promise<{ ok: boolean }> {
+  const validFlightId = validateFlightId(flightId);
+
+  const result = await mainDb
+    .updateTable('flights')
+    .set({ featured_on_profile: false, updated_at: createUTCDate() })
+    .where('id', '=', validFlightId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  return { ok: Number(result.numUpdatedRows ?? 0) > 0 };
+}
+
+export async function getFeaturedFlightsByUser(userId: string) {
+  try {
+    const flights = await mainDb
+      .selectFrom('flights')
+      .select([
+        'id',
+        'session_id',
+        'callsign',
+        'departure',
+        'arrival',
+        'aircraft',
+        'status',
+        'snap_images',
+        'featured_on_profile',
+        'created_at',
+        'acars_token',
+      ])
+      .where('user_id', '=', userId)
+      .where('featured_on_profile', '=', true)
+      .orderBy('created_at', 'desc')
+      .execute();
+
+    return flights.map((f) => ({
+      id: f.id,
+      callsign: f.callsign,
+      departure: f.departure,
+      arrival: f.arrival,
+      aircraft: f.aircraft,
+      status: f.status,
+      snap_images:
+        (f.snap_images as Array<{ cephie_id: string; url: string }> | null) ??
+        [],
+      created_at: f.created_at,
+    }));
+  } catch (error) {
+    console.error(`Error fetching featured flights for user ${userId}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Every featured flight platform-wide, joined with its owner, for the admin
+ * moderation view — same fields a public profile shows (including
+ * snap_images), so a reviewer sees exactly what's publicly visible.
+ */
+export async function getAllFeaturedFlightsForAdmin() {
+  const flights = await mainDb
+    .selectFrom('flights')
+    .innerJoin('users', 'users.id', 'flights.user_id')
+    .select([
+      'flights.id',
+      'flights.user_id',
+      'users.username',
+      'users.avatar',
+      'flights.callsign',
+      'flights.departure',
+      'flights.arrival',
+      'flights.aircraft',
+      'flights.status',
+      'flights.snap_images',
+      'flights.created_at',
+      'flights.updated_at',
+    ])
+    .where('flights.featured_on_profile', '=', true)
+    .orderBy('flights.updated_at', 'desc')
+    .execute();
+
+  return flights.map((f) => ({
+    id: f.id,
+    userId: f.user_id,
+    username: f.username,
+    avatar: f.avatar,
+    callsign: f.callsign,
+    departure: f.departure,
+    arrival: f.arrival,
+    aircraft: f.aircraft,
+    status: f.status,
+    snapImages:
+      (f.snap_images as Array<{ cephie_id: string; url: string }> | null) ?? [],
+    createdAt: f.created_at,
+    updatedAt: f.updated_at,
+  }));
+}

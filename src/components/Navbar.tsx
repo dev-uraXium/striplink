@@ -1,0 +1,709 @@
+import {
+  Menu,
+  X,
+  Copy,
+  Bell,
+  Info,
+  CheckCircle,
+  AlertTriangle,
+  ShieldX,
+  ChevronDown,
+  ChevronUp,
+  HelpCircle,
+} from 'lucide-react';
+import { useState, useEffect, useLayoutEffect } from 'react';
+import { useNotifications } from '../hooks/useNotifications';
+import { linkify } from '../utils/linkify';
+import { useAuth } from '../hooks/auth/useAuth';
+import type { Notification as AdminNotification } from '../utils/fetch/admin';
+import CustomUserButton from './tools/UserButton';
+import Button from './common/Button';
+import FeedbackBanner from './tools/FeedbackBanner';
+import { fetchSiteSettings } from '../utils/fetch/siteSettings';
+import BrandMark from './BrandMark';
+import { BRAND } from '../brand';
+
+type NavbarProps = {
+  sessionId?: string;
+  accessId?: string;
+  mobileSidebarOpen?: boolean;
+};
+
+type NotificationType = 'info' | 'warning' | 'success' | 'error';
+type AppNotification = AdminNotification & { custom_icon?: React.ReactNode };
+
+export default function Navbar({
+  sessionId,
+  accessId,
+  mobileSidebarOpen,
+}: NavbarProps) {
+  const { user } = useAuth();
+  const {
+    notifications: filteredNotifications,
+    currentNotification,
+    currentNotificationIndex,
+    hideNotification,
+  } = useNotifications();
+
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [utcTime, setUtcTime] = useState<string>('');
+  const [isCompact, setIsCompact] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [isScrolled, setIsScrolled] = useState<boolean>(false);
+  const [hostname, setHostname] = useState<string>('');
+  const [showAllNotifications, setShowAllNotifications] = useState(false);
+  const [showFeedbackBanner, setShowFeedbackBanner] = useState(false);
+  const [feedbackBannerEnabled, setFeedbackBannerEnabled] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    fetchSiteSettings()
+      .then((s) => {
+        if (!cancelled) setFeedbackBannerEnabled(s.feedbackBannerEnabled);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    setUtcTime(new Date().toISOString().slice(11, 19));
+  }, []);
+
+  useEffect(() => {
+    const checkFeedbackCookies = () => {
+      const cookies = document.cookie.split(';').reduce(
+        (acc, cookie) => {
+          const [key, value] = cookie.trim().split('=');
+          acc[key] = value;
+          return acc;
+        },
+        {} as Record<string, string>
+      );
+
+      const feedbackSubmitted = cookies['feedback_submitted'] === 'true';
+      const feedbackDismissed = cookies['feedback_dismissed'] === 'true';
+      const hasNotifications = filteredNotifications.length > 0;
+      const shouldShow =
+        feedbackBannerEnabled &&
+        !hasNotifications &&
+        !feedbackSubmitted &&
+        !feedbackDismissed;
+
+      setShowFeedbackBanner(shouldShow);
+    };
+
+    checkFeedbackCookies();
+  }, [filteredNotifications.length, feedbackBannerEnabled]);
+
+  useLayoutEffect(() => {
+    const handleResize = () => {
+      setIsCompact(window.innerWidth < 1150);
+      setIsMobile(window.innerWidth < 925);
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    setHostname(window.location.hostname);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: Event) => {
+      if (
+        isMenuOpen &&
+        !(event.target as HTMLElement).closest('.mobile-menu-container')
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMenuOpen(false);
+      }
+    };
+
+    if (isMenuOpen) {
+      document.addEventListener('click', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'unset';
+    };
+  }, [isMenuOpen]);
+
+  useEffect(() => {
+    if (sessionId && accessId) {
+      const interval = setInterval(() => {
+        setUtcTime(new Date().toISOString().slice(11, 19));
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [sessionId, accessId]);
+
+  useEffect(() => {
+    if (!user && isMobile) setIsMenuOpen(false);
+  }, [user, isMobile]);
+
+  useLayoutEffect(() => {
+    const isTrustedScrollSource = (target: EventTarget | null): boolean => {
+      if (target == null || target === document || target === window) {
+        return true;
+      }
+      return (
+        target instanceof HTMLElement && target.dataset.scrollRoot === 'true'
+      );
+    };
+    const getScrollTop = (target: EventTarget | null): number =>
+      target instanceof HTMLElement ? target.scrollTop : window.scrollY;
+    const onScroll = (e?: Event) => {
+      const target = e?.target ?? null;
+      if (!isTrustedScrollSource(target)) return;
+      setIsScrolled(getScrollTop(target) > 0);
+    };
+    window.addEventListener('scroll', onScroll, {
+      passive: true,
+      capture: true,
+    });
+    onScroll();
+    return () =>
+      window.removeEventListener('scroll', onScroll, { capture: true });
+  }, []);
+
+  const shouldShowBackdrop = isMobile && mobileSidebarOpen;
+  const showBackdrop = shouldShowBackdrop || isScrolled;
+
+  const navZIndex = mobileSidebarOpen && isMobile ? 'z-30' : 'z-[9999]';
+
+  const navClass = [
+    `fixed top-0 w-full ${navZIndex} transition-all duration-150 ease-in-out`,
+    showBackdrop
+      ? 'bg-black/30 backdrop-blur-md border-white/10'
+      : 'bg-transparent border-none',
+  ].join(' ');
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const submitLink = `${origin}/submit/${sessionId}`;
+  const viewLink = `${origin}/view/${sessionId}?accessId=${accessId}`;
+
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(text);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+
+        if (successful) {
+          setCopied(text);
+          setTimeout(() => setCopied(null), 2000);
+        } else {
+          console.error('Fallback copy method failed');
+        }
+      } catch (fallbackError) {
+        console.error('Failed to copy text to clipboard', fallbackError);
+      }
+    }
+  };
+
+  const getNotificationIcon = (type: NotificationType) => {
+    switch (type) {
+      case 'info':
+        return <Info className="h-4 w-4" />;
+      case 'warning':
+        return <AlertTriangle className="h-4 w-4" />;
+      case 'success':
+        return <CheckCircle className="h-4 w-4" />;
+      case 'error':
+        return <ShieldX className="h-4 w-4" />;
+      default:
+        return <Bell className="h-4 w-4" />;
+    }
+  };
+
+  const getNotificationStyle = (notification: AppNotification) => {
+    if (notification.custom_color) {
+      return {
+        backgroundColor: `${notification.custom_color}B3`,
+        borderColor: `${notification.custom_color}80`,
+      };
+    }
+
+    switch (notification.type) {
+      case 'info':
+        return {
+          backgroundColor: 'rgba(59, 130, 246, 0.7)',
+          borderColor: 'rgba(96, 165, 250, 0.5)',
+        };
+      case 'warning':
+        return {
+          backgroundColor: 'rgba(245, 158, 11, 0.7)',
+          borderColor: 'rgba(251, 191, 36, 0.5)',
+        };
+      case 'success':
+        return {
+          backgroundColor: 'rgba(16, 185, 129, 0.7)',
+          borderColor: 'rgba(52, 211, 153, 0.5)',
+        };
+      case 'error':
+        return {
+          backgroundColor: 'rgba(239, 68, 68, 0.7)',
+          borderColor: 'rgba(248, 113, 113, 0.5)',
+        };
+      default:
+        return {
+          backgroundColor: 'rgba(107, 114, 128, 0.7)',
+          borderColor: 'rgba(156, 163, 175, 0.5)',
+        };
+    }
+  };
+
+  return (
+    <>
+      {/* Mobile Notification Banner */}
+      {filteredNotifications.length > 0 && isMobile && (
+        <div className="fixed bottom-4 left-4 right-4 z-40">
+          <div className="flex items-start space-x-2">
+            {filteredNotifications.length > 1 && (
+              <button
+                onClick={() => setShowAllNotifications(!showAllNotifications)}
+                className="flex-shrink-0 w-8 h-8 rounded-full backdrop-blur-lg border flex items-center justify-center"
+                style={{
+                  backgroundColor: currentNotification.custom_color
+                    ? `${currentNotification.custom_color}B3`
+                    : currentNotification.type === 'info'
+                      ? 'rgba(59, 130, 246, 0.7)'
+                      : currentNotification.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.7)'
+                        : currentNotification.type === 'success'
+                          ? 'rgba(16, 185, 129, 0.7)'
+                          : currentNotification.type === 'error'
+                            ? 'rgba(239, 68, 68, 0.7)'
+                            : 'rgba(107, 114, 128, 0.7)',
+                  borderColor: currentNotification.custom_color
+                    ? `${currentNotification.custom_color}80`
+                    : currentNotification.type === 'info'
+                      ? 'rgba(96, 165, 250, 0.5)'
+                      : currentNotification.type === 'warning'
+                        ? 'rgba(251, 191, 36, 0.5)'
+                        : currentNotification.type === 'success'
+                          ? 'rgba(52, 211, 153, 0.5)'
+                          : currentNotification.type === 'error'
+                            ? 'rgba(248, 113, 113, 0.5)'
+                            : 'rgba(156, 163, 175, 0.5)',
+                }}
+              >
+                {showAllNotifications ? (
+                  <ChevronUp className="h-4 w-4 text-white" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-white" />
+                )}
+              </button>
+            )}
+
+            <div className="flex-1">
+              <div
+                className="transition-all duration-300 ease-in-out overflow-hidden"
+                style={{
+                  maxHeight: showAllNotifications ? '300px' : 'auto',
+                }}
+              >
+                <div className={showAllNotifications ? 'space-y-2' : ''}>
+                  {filteredNotifications.map((notification, index) => (
+                    <div
+                      key={index}
+                      className={`backdrop-blur-lg border rounded-2xl px-3 py-2 ${
+                        showAllNotifications ||
+                        index === currentNotificationIndex
+                          ? ''
+                          : 'hidden'
+                      }`}
+                      style={getNotificationStyle(notification)}
+                    >
+                      <div className="flex items-start space-x-2">
+                        <div className="flex-shrink-0 mt-0.5">
+                          {notification.custom_icon ||
+                            getNotificationIcon(notification.type)}
+                        </div>
+                        <p className="text-sm font-medium text-white leading-tight flex-1 overflow-wrap-anywhere break-words">
+                          {linkify(notification.text)}
+                        </p>
+                        <button
+                          onClick={() => hideNotification(notification.id)}
+                          className="flex-shrink-0 ml-2 text-white hover:text-gray-300 transition-colors"
+                          aria-label="Hide notification"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <nav className={navClass}>
+        <div className="max-w-7xl mx-auto px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-4">
+              <a href="/" className="flex items-center space-x-2">
+                <BrandMark className="h-8 w-8" />
+                <span className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-blue-600 bg-clip-text text-transparent">
+                  StripLink
+                  {hostname.startsWith('canary.') && (
+                    <span className="bg-gradient-to-r from-blue-300 to-blue-500 bg-clip-text text-transparent italic text-md">
+                      {' '}
+                      Canary
+                    </span>
+                  )}
+                  {hostname === 'localhost' && (
+                    <span className="bg-gradient-to-r from-yellow-400 to-yellow-600 bg-clip-text text-transparent italic text-md">
+                      {' '}
+                      Developers
+                    </span>
+                  )}
+                </span>
+              </a>
+            </div>
+
+            {sessionId && accessId && (
+              <div className="flex-1 flex justify-center items-center space-x-3">
+                {!isMobile && BRAND.discordUrl && (
+                  <div className="relative">
+                    <a
+                      href={BRAND.discordUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center font-medium focus:outline-none bg-linear-to-b from-yellow-500 to-yellow-700  border-none hover:bg-linear-to-b hover:from-yellow-600 hover:to-yellow-700 text-white shadow-lg hover:shadow-xl border-none rounded-full px-4 py-2 text-sm relative overflow-hidden transition-all duration-300"
+                    >
+                      <div className="flex items-center space-x-2 transition-transform duration-300">
+                        {isCompact ? (
+                          <HelpCircle
+                            className="h-4 w-4"
+                            aria-label="Support"
+                          />
+                        ) : (
+                          <>
+                            <HelpCircle className="h-4 w-4" />
+                            <span className="font-medium">Support</span>
+                          </>
+                        )}
+                      </div>
+                    </a>
+                  </div>
+                )}
+                <span
+                  id="utc-time"
+                  className="text-white font-mono text-sm px-3 py-1.5 rounded-lg hidden sm:inline"
+                >
+                  {utcTime} UTC
+                </span>
+                <div className="relative">
+                  <Button
+                    variant="primary"
+                    className={`relative overflow-hidden transition-all duration-300 ${
+                      copied === submitLink
+                        ? 'bg-none bg-emerald-600 hover:bg-none hover:bg-emerald-600 border-emerald-600'
+                        : ''
+                    }`}
+                    size="sm"
+                    onClick={() => handleCopy(submitLink)}
+                    id="submit-link-btn"
+                  >
+                    <div
+                      className={`flex items-center space-x-2 transition-transform duration-300 ${
+                        copied === submitLink ? 'scale-105' : ''
+                      }`}
+                    >
+                      {isCompact ? (
+                        <Copy
+                          className={`h-4 w-4 transition-transform duration-300 ${
+                            copied === submitLink ? 'rotate-12' : ''
+                          }`}
+                          aria-label="Copy Submit Link"
+                        />
+                      ) : (
+                        <>
+                          <Copy
+                            className={`h-4 w-4 transition-transform duration-300 ${
+                              copied === submitLink ? 'rotate-12' : ''
+                            }`}
+                          />
+                          <span className="font-medium">
+                            {copied === submitLink ? 'Copied!' : 'Submit Link'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {copied === submitLink && (
+                      <div className="absolute inset-0 bg-emerald-400/20 animate-pulse rounded-lg pointer-events-none"></div>
+                    )}
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Button
+                    variant="danger"
+                    className={`relative overflow-hidden transition-all duration-300 ${
+                      copied === viewLink
+                        ? 'bg-none bg-emerald-600 hover:bg-none hover:bg-emerald-600 border-emerald-600'
+                        : ''
+                    }`}
+                    size="sm"
+                    onClick={() => handleCopy(viewLink)}
+                    id="view-link-btn"
+                  >
+                    <div
+                      className={`flex items-center space-x-2 transition-transform duration-300 ${
+                        copied === viewLink ? 'scale-105' : ''
+                      }`}
+                    >
+                      {isCompact ? (
+                        <Copy
+                          className={`h-4 w-4 transition-transform duration-300 ${
+                            copied === viewLink ? 'rotate-12' : ''
+                          }`}
+                          aria-label="Copy View Link"
+                        />
+                      ) : (
+                        <>
+                          <Copy
+                            className={`h-4 w-4 transition-transform duration-300 ${
+                              copied === viewLink ? 'rotate-12' : ''
+                            }`}
+                          />
+                          <span className="font-medium">
+                            {copied === viewLink ? 'Copied!' : 'View Link'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {copied === viewLink && (
+                      <div className="absolute inset-0 bg-emerald-400/20 animate-pulse rounded-lg pointer-events-none"></div>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Desktop Navigation */}
+            {!isMobile && (
+              <div className="flex items-center space-x-4">
+                {!sessionId && (
+                  <div className="flex items-center gap-6 whitespace-nowrap">
+                    <a
+                      href="/create"
+                      className="text-white hover:text-blue-400 transition-colors duration-300 font-medium"
+                    >
+                      Create Session
+                    </a>
+                    <a
+                      href="/sessions"
+                      className="text-white hover:text-blue-400 transition-colors duration-300 font-medium"
+                    >
+                      My Sessions
+                    </a>
+                    {user && (
+                      <a
+                        href="/my-flights"
+                        className="text-white hover:text-blue-400 transition-colors duration-300 font-medium"
+                      >
+                        My Flights
+                      </a>
+                    )}
+                    <a
+                      href="/overview"
+                      className="text-white hover:text-blue-400 transition-colors duration-300 font-medium"
+                    >
+                      Network Flights
+                    </a>
+                    <a
+                      href="/charts"
+                      className="text-white hover:text-blue-400 transition-colors duration-300 font-medium"
+                    >
+                      Charts
+                    </a>
+                  </div>
+                )}
+                <CustomUserButton />
+              </div>
+            )}
+
+            {/* Mobile Menu Button */}
+            {isMobile && (
+              <div>
+                {!user ? (
+                  <a
+                    href={`/login?callback=${encodeURIComponent(window.location.pathname + window.location.search)}`}
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-white hover:text-blue-400 transition-colors duration-300 p-2 rounded-lg hover:bg-white/10 font-medium"
+                  >
+                    Log in
+                  </a>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMenuOpen(!isMenuOpen);
+                    }}
+                    className="text-white hover:text-blue-400 transition-colors duration-300 p-2 rounded-lg hover:bg-white/10"
+                    aria-label="Toggle menu"
+                  >
+                    {isMenuOpen ? (
+                      <X className="h-6 w-6" />
+                    ) : (
+                      <Menu className="h-6 w-6" />
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Mobile Navigation Dropdown */}
+          {isMobile && (
+            <div className="mobile-menu-container relative">
+              <div
+                className={`
+                            absolute top-2 right-0 w-72 max-w-[calc(100vw-2rem)]
+                            bg-zinc-950 backdrop-blur-xl border border-zinc-800
+                            rounded-3xl shadow-2xl overflow-hidden
+                            transform transition-all duration-300 ease-out origin-top-right
+                            ${
+                              isMenuOpen
+                                ? 'opacity-100 scale-100 translate-y-0'
+                                : 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
+                            }
+                        `}
+              >
+                <CustomUserButton
+                  isMobile={true}
+                  className="w-full"
+                  onAction={() => setIsMenuOpen(false)}
+                />
+              </div>
+
+              {isMenuOpen && (
+                <div
+                  className="fixed inset-0 bg-black/20 backdrop-blur-sm -z-10"
+                  onClick={() => setIsMenuOpen(false)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </nav>
+
+      {/* Desktop Notifications */}
+      {currentNotification && !isMobile && (
+        <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40">
+          <div className="relative">
+            <div
+              className="transition-all duration-300 ease-in-out overflow-hidden"
+              style={{
+                maxHeight: showAllNotifications ? '300px' : '60px',
+              }}
+            >
+              <div className={showAllNotifications ? 'space-y-2' : ''}>
+                {filteredNotifications.map((notification, index) => (
+                  <div
+                    key={index}
+                    className={`backdrop-blur-lg border rounded-full px-4 py-3 max-w-full transition-all duration-300 ease-in-out ${
+                      showAllNotifications || index === currentNotificationIndex
+                        ? ''
+                        : 'hidden'
+                    }`}
+                    style={getNotificationStyle(notification)}
+                  >
+                    <div className="flex items-start space-x-2">
+                      <div className="flex-shrink-0 mt-[1px]">
+                        {notification.custom_icon ||
+                          getNotificationIcon(notification.type)}
+                      </div>
+                      <p className="text-sm font-medium text-white leading-tight flex-1">
+                        {linkify(notification.text)}
+                      </p>
+                      <button
+                        onClick={() => hideNotification(notification.id)}
+                        className="flex-shrink-0 ml-2 text-white hover:text-gray-300 transition-colors"
+                        aria-label="Hide notification"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {filteredNotifications.length > 1 && (
+              <button
+                onClick={() => setShowAllNotifications(!showAllNotifications)}
+                className="absolute bottom-0.5 -left-12 w-10 h-10 rounded-full backdrop-blur-lg border flex items-center justify-center transition-all duration-300 ease-in-out"
+                style={{
+                  backgroundColor: currentNotification.custom_color
+                    ? `${currentNotification.custom_color}B3`
+                    : currentNotification.type === 'info'
+                      ? 'rgba(59, 130, 246, 0.7)'
+                      : currentNotification.type === 'warning'
+                        ? 'rgba(245, 158, 11, 0.7)'
+                        : currentNotification.type === 'success'
+                          ? 'rgba(16, 185, 129, 0.7)'
+                          : currentNotification.type === 'error'
+                            ? 'rgba(239, 68, 68, 0.7)'
+                            : 'rgba(107, 114, 128, 0.7)',
+                  borderColor: currentNotification.custom_color
+                    ? `${currentNotification.custom_color}80`
+                    : currentNotification.type === 'info'
+                      ? 'rgba(96, 165, 250, 0.5)'
+                      : currentNotification.type === 'warning'
+                        ? 'rgba(251, 191, 36, 0.5)'
+                        : currentNotification.type === 'success'
+                          ? 'rgba(52, 211, 153, 0.5)'
+                          : currentNotification.type === 'error'
+                            ? 'rgba(248, 113, 113, 0.5)'
+                            : 'rgba(156, 163, 175, 0.5)',
+                }}
+              >
+                {showAllNotifications ? (
+                  <ChevronUp className="h-5 w-5 text-white" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-white" />
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+
+      {user && (
+        <FeedbackBanner
+          isOpen={showFeedbackBanner}
+          onClose={() => setShowFeedbackBanner(false)}
+        />
+      )}
+    </>
+  );
+}

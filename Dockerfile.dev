@@ -1,0 +1,29 @@
+FROM node:22-alpine
+
+# Install dumb-init.
+RUN ok=0; \
+    for i in 1 2 3 4 5; do \
+      apk add --no-cache dumb-init && { ok=1; break; }; \
+      echo "apk add failed (attempt $i/5), retrying in 5s..."; \
+      sleep 5; \
+    done; \
+    [ "$ok" = "1" ]
+
+WORKDIR /app
+
+# Copy package files and postinstall script
+COPY package*.json ./
+COPY scripts ./scripts
+
+# Install all dependencies (including dev dependencies)
+RUN npm install
+
+# Copy source code
+COPY . .
+
+# Expose ports for both server and vite
+EXPOSE 9901 5173
+
+# Start development server
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["npm", "run", "dev"]
