@@ -216,6 +216,14 @@ export function setupFlightsWebsocket(httpServer: HTTPServer): SocketIOServer {
 
     socket.on('addFlight', async (flightData: Partial<AddFlightData>) => {
       const sessionId = socket.data.sessionId;
+      // StripLink: pilots file through the Google Form; only controllers add flights here
+      if (socket.data.role !== 'controller') {
+        socket.emit('flightError', {
+          action: 'add',
+          error: 'File your flight plan through the Google Form.',
+        });
+        return;
+      }
       try {
         const enhancedFlightData = {
           ...flightData,

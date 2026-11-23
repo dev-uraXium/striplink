@@ -15,7 +15,6 @@ import PostHogPageView from './components/PostHogPageView';
 
 const loadCreate = () => import('./pages/Create');
 const loadSessions = () => import('./pages/Sessions');
-const loadSubmit = () => import('./pages/Submit');
 const loadFlights = () => import('./pages/Flights');
 const loadMyFlights = () => import('./pages/MyFlights');
 const loadMyFlightDetail = () => import('./pages/MyFlightDetail');
@@ -28,7 +27,6 @@ const loadCharts = () => import('./pages/Charts');
 const PRELOADED_PAGES = [
   loadSessions,
   loadMyFlights,
-  loadSubmit,
   loadAcarsRoute,
   loadPFATCFlights,
   loadCreate,
@@ -41,7 +39,6 @@ const PRELOADED_PAGES = [
 
 const Create = lazy(loadCreate);
 const Sessions = lazy(loadSessions);
-const Submit = lazy(loadSubmit);
 const Flights = lazy(loadFlights);
 const MyFlights = lazy(loadMyFlights);
 const MyFeedback = lazy(() => import('./pages/MyFeedback'));
@@ -158,7 +155,6 @@ export default function App() {
               path="/charts/chartfox/linked"
               element={<ChartfoxLinked />}
             />
-            <Route path="/submit/:sessionId" element={<Submit />} />
             <Route path="acars/:sessionId/:flightId" element={<AcarsRoute />} />
             <Route path="flight/:flightId" element={<PublicFlightView />} />
             <Route path="/user/:username" element={<PilotProfile />} />

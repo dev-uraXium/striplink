@@ -53,6 +53,7 @@ export default function AtisReminderModal({
   networkSessionKind,
 }: AtisReminderModalProps) {
   const isAdvancedAtc = networkSessionKind === 'advanced_atc';
+  // /submit/:sessionId redirects to the session's Google Form
   const submitLink = `${window.location?.origin}/submit/${sessionId}`;
   const [copied, setCopied] = useState(false);
   const [continuing, setContinuing] = useState(false);

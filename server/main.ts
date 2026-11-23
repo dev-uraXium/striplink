@@ -260,6 +260,36 @@ function injectCspNonceIntoScripts(html: string, nonce: string): string {
   );
 }
 
+// StripLink: the old submit page is gone; /submit/:sessionId sends pilots to the
+// session's Google Form instead (so links already shared keep working).
+app.get('/submit/:sessionId', async (req, res) => {
+  const sessionId = String(req.params.sessionId).toLowerCase();
+  const fallback = (msg: string) =>
+    res
+      .status(404)
+      .type('html')
+      .send(
+        `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>StripLink</title><body style="font-family:system-ui;background:#000;color:#d4d4d8;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:1rem"><div><h1 style="color:#fff">File your flight plan</h1><p>${msg}</p><p>Ask your controller for the flight plan form link.</p></div>`
+      );
+  try {
+    if (!/^[a-z0-9]{8}$/.test(sessionId))
+      return fallback('That link does not look right.');
+    const { getFormSettings } = await import('./forms/intake.js');
+    const { getSharedForm, sharedFormLink } = await import('./forms/shared.js');
+    const settings = await getFormSettings(sessionId);
+    if (!settings) return fallback('That session was not found or has ended.');
+    const link = settings.form_webhook_secret
+      ? sharedFormLink(await getSharedForm(), sessionId)
+      : null;
+    if (!link)
+      return fallback('This session is not taking flight plans right now.');
+    res.redirect(302, link);
+  } catch (err) {
+    console.error('[submit redirect]', err);
+    fallback('Something went wrong.');
+  }
+});
+
 if (astroHandler) {
   app.use((req, res, next) => {
     if (req.query['tutorial'] === 'true') return next();

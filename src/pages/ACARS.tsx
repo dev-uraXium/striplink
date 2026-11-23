@@ -543,10 +543,10 @@ export default function ACARS() {
                 size="sm"
                 className={SIGNATURE_TONES.blue}
               >
-                <Link to={`/submit/${sessionId}`}>
+                <a href={`/submit/${sessionId}`}>
                   <Plus />
                   New flight
-                </Link>
+                </a>
               </Button>
             </div>
           )}

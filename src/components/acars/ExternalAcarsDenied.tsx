@@ -46,7 +46,7 @@ export default function ExternalAcarsDenied({
               size="sm"
               className={SIGNATURE_TONES.blue}
             >
-              <Link to={`/submit/${sessionId}`}>New flight</Link>
+              <a href={`/submit/${sessionId}`}>New flight</a>
             </Button>
           )}
         </div>

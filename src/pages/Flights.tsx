@@ -649,7 +649,7 @@ export default function Flights() {
     };
 
     try {
-      await addFlight(sessionId, newFlightData);
+      await addFlight(sessionId, newFlightData, accessId);
     } catch (error) {
       console.error('Failed to add custom departure:', error);
       toast.error(
@@ -682,7 +682,7 @@ export default function Flights() {
     };
 
     try {
-      await addFlight(sessionId, newFlightData);
+      await addFlight(sessionId, newFlightData, accessId);
     } catch (error) {
       console.error('Failed to add custom arrival:', error);
       toast.error(

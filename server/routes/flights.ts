@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import FormData from 'form-data';
 import axios from 'axios';
-import requireAuth, { optionalAuth } from '../middleware/auth.js';
+import requireAuth from '../middleware/auth.js';
 import {
   requireFlightAccess,
   requireFlightDeleteAccess,
@@ -431,10 +431,13 @@ router.get('/:sessionId', requireAuth, async (req, res) => {
 });
 
 // POST: /api/flights/:sessionId - add a flight to a session
+// StripLink: pilots file through the Google Form only; adding flights here is for the
+// session's controllers (owner, view link, sector controllers).
 router.post(
   '/:sessionId',
   flightCreationLimiter,
-  optionalAuth,
+  requireAuth,
+  requireFlightAccess,
   async (req, res) => {
     try {
       const flightData = {

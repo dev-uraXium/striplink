@@ -18,7 +18,6 @@ import {
   PilotProfilePageSkeleton,
   SessionsPageSkeleton,
   SettingsPageSkeleton,
-  SubmitPageSkeleton,
 } from './PageSkeletons';
 
 function AdminRouteSkeleton({ overview }: { overview: boolean }) {
@@ -58,7 +57,6 @@ const ROUTES: [string, (params: Record<string, string>) => ReactNode][] = [
   ['/my-flights/:id', () => <FlightDetailPageSkeleton />],
   ['/flight/:flightId', () => <FlightDetailPageSkeleton />],
   ['/settings', () => <SettingsPageSkeleton />],
-  ['/submit/:sessionId', () => <SubmitPageSkeleton />],
   ['/user/:username', () => <PilotProfilePageSkeleton />],
   ['/acars/:sessionId/:flightId', () => <AcarsPageSkeleton />],
   [

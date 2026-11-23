@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import {
   Loader2,
   Map as MapIcon,
@@ -322,10 +322,10 @@ export default function ExternalACARS() {
                     size="sm"
                     className={SIGNATURE_TONES.blue}
                   >
-                    <Link to={`/submit/${sessionId}`}>
+                    <a href={`/submit/${sessionId}`}>
                       <Plus />
                       New flight
-                    </Link>
+                    </a>
                   </Button>
                 </>
               )}

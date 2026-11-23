@@ -203,7 +203,7 @@ export default function Navbar({
       cancelled = true;
     };
   }, [sessionId, accessId]);
-  const submitLink = formLink ?? `${origin}/submit/${sessionId}`;
+  const submitLink = formLink ?? '';
   const viewLink = `${origin}/view/${sessionId}?accessId=${accessId}`;
 
   const handleCopy = async (text: string) => {
@@ -431,48 +431,50 @@ export default function Navbar({
                 >
                   {utcTime} UTC
                 </span>
-                <div className="relative">
-                  <Button
-                    variant="primary"
-                    className={`relative overflow-hidden transition-all duration-300 ${
-                      copied === submitLink
-                        ? 'bg-none bg-emerald-600 hover:bg-none hover:bg-emerald-600 border-emerald-600'
-                        : ''
-                    }`}
-                    size="sm"
-                    onClick={() => handleCopy(submitLink)}
-                    id="submit-link-btn"
-                  >
-                    <div
-                      className={`flex items-center space-x-2 transition-transform duration-300 ${
-                        copied === submitLink ? 'scale-105' : ''
+                {submitLink && (
+                  <div className="relative">
+                    <Button
+                      variant="primary"
+                      className={`relative overflow-hidden transition-all duration-300 ${
+                        copied === submitLink
+                          ? 'bg-none bg-emerald-600 hover:bg-none hover:bg-emerald-600 border-emerald-600'
+                          : ''
                       }`}
+                      size="sm"
+                      onClick={() => handleCopy(submitLink)}
+                      id="submit-link-btn"
                     >
-                      {isCompact ? (
-                        <Copy
-                          className={`h-4 w-4 transition-transform duration-300 ${
-                            copied === submitLink ? 'rotate-12' : ''
-                          }`}
-                          aria-label="Copy Submit Link"
-                        />
-                      ) : (
-                        <>
+                      <div
+                        className={`flex items-center space-x-2 transition-transform duration-300 ${
+                          copied === submitLink ? 'scale-105' : ''
+                        }`}
+                      >
+                        {isCompact ? (
                           <Copy
                             className={`h-4 w-4 transition-transform duration-300 ${
                               copied === submitLink ? 'rotate-12' : ''
                             }`}
+                            aria-label="Copy the flight plan form link"
                           />
-                          <span className="font-medium">
-                            {copied === submitLink ? 'Copied!' : 'Submit Link'}
-                          </span>
-                        </>
+                        ) : (
+                          <>
+                            <Copy
+                              className={`h-4 w-4 transition-transform duration-300 ${
+                                copied === submitLink ? 'rotate-12' : ''
+                              }`}
+                            />
+                            <span className="font-medium">
+                              {copied === submitLink ? 'Copied!' : 'Form Link'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {copied === submitLink && (
+                        <div className="absolute inset-0 bg-emerald-400/20 animate-pulse rounded-lg pointer-events-none"></div>
                       )}
-                    </div>
-                    {copied === submitLink && (
-                      <div className="absolute inset-0 bg-emerald-400/20 animate-pulse rounded-lg pointer-events-none"></div>
-                    )}
-                  </Button>
-                </div>
+                    </Button>
+                  </div>
+                )}
                 <div className="relative">
                   <Button
                     variant="danger"

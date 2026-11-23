@@ -14,14 +14,19 @@ export async function fetchFlights(sessionId: string): Promise<Flight[]> {
 
 export async function addFlight(
   sessionId: string,
-  flight: Partial<Flight>
+  flight: Partial<Flight>,
+  accessId?: string
 ): Promise<Flight> {
-  const res = await apiFetch(`${API_BASE_URL}/api/flights/${sessionId}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(flight),
-  });
+  const query = accessId ? `?accessId=${encodeURIComponent(accessId)}` : '';
+  const res = await apiFetch(
+    `${API_BASE_URL}/api/flights/${sessionId}${query}`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(flight),
+    }
+  );
   if (!res.ok) await apiError(res, 'Failed to add flight');
   return res.json();
 }
