@@ -179,6 +179,29 @@ function setupStripLinkForm() {
   registerWithStripLink();
 }
 
+/** Every question's entry ID (and choices), so StripLink can pre-fill the whole form. */
+function formFields_() {
+  const form = FormApp.getActiveForm();
+  return form.getItems().map(function (item) {
+    const type = item.getType();
+    let response = null;
+    let choices = null;
+    if (type === FormApp.ItemType.TEXT) response = item.asTextItem().createResponse('x');
+    else if (type === FormApp.ItemType.PARAGRAPH_TEXT) response = item.asParagraphTextItem().createResponse('x');
+    else if (type === FormApp.ItemType.LIST) {
+      choices = item.asListItem().getChoices().map(function (c) { return c.getValue(); });
+      if (choices.length) response = item.asListItem().createResponse(choices[0]);
+    } else if (type === FormApp.ItemType.MULTIPLE_CHOICE) {
+      choices = item.asMultipleChoiceItem().getChoices().map(function (c) { return c.getValue(); });
+      if (choices.length) response = item.asMultipleChoiceItem().createResponse(choices[0]);
+    }
+    if (!response) return null;
+    const url = form.createResponse().withItemResponse(response).toPrefilledUrl();
+    const m = url.match(/[?&](entry\\.\\d+)=/);
+    return m ? { title: item.getTitle(), entry: m[1], type: String(type), choices: choices } : null;
+  }).filter(function (f) { return f; });
+}
+
 /**
  * NOT USED: Project Flight's API refuses server requests (Cloudflare challenge), so the
  * import can't fetch plans. Kept for if PF ever offers official access.
@@ -223,6 +246,7 @@ function registerWithStripLink() {
     prefillTemplate: prefill,
     editUrl: form.getEditUrl(),
     title: form.getTitle(),
+    fields: formFields_(),
   });
   if (code < 300) console.log('Registered "' + form.getTitle() + '" with StripLink. Pilot link: ' + form.getPublishedUrl());
 }

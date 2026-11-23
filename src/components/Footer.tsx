@@ -47,6 +47,7 @@ const quickLinks: FooterLink[] = [
 const resourceLinks: FooterLink[] = [
   { href: '/howToUsePFControl', label: 'Guide', icon: BookOpen },
   { href: '/glossary', label: 'Glossary', icon: BookA },
+  { href: '/pftracker', label: 'PFTracker → StripLink', icon: BookOpen },
   ...(BRAND.supportEmail
     ? [{ href: `mailto:${BRAND.supportEmail}`, label: BRAND.supportEmail, icon: Mail }]
     : []),

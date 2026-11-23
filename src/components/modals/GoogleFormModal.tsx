@@ -218,6 +218,13 @@ export default function GoogleFormModal({ isOpen, onClose, sessionId, airportIca
                     Share this with pilots. It opens the StripLink flight plan form with this session already
                     filled in, so responses land straight on this board. Nothing to set up.
                   </p>
+                  <p className="text-xs text-zinc-400">
+                    Pilots who file on PFTracker can copy their plan straight into the form with the{' '}
+                    <a href="/pftracker" target="_blank" rel="noreferrer" className="text-blue-300 underline">
+                      Send to StripLink button
+                    </a>
+                    .
+                  </p>
                   <div className="flex flex-wrap items-center gap-2">
                     <code className="min-w-0 flex-1 truncate rounded-full bg-black/40 px-3 py-1.5 font-mono text-xs text-zinc-200">
                       {settings.sharedFormUrl}

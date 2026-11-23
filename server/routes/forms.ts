@@ -19,7 +19,9 @@ import {
 import { formsPollerInfo } from '../forms/poller.js';
 import { requireAdmin } from '../middleware/admin.js';
 import {
+  buildPrefilledLink,
   getSharedForm,
+  parseFormFields,
   setSharedForm,
   sharedFormLink,
   sharedFormSecret,
@@ -152,6 +154,7 @@ router.post('/shared/register', async (req, res) => {
     editUrl: str(req.body?.editUrl, 500),
     title: str(req.body?.title, 200),
     registeredAt: new Date().toISOString(),
+    fields: parseFormFields(req.body?.fields),
   });
   res.json({ ok: true });
 });
@@ -187,6 +190,37 @@ router.get('/link/:sessionId', async (req, res) => {
   const shared = settings.form_webhook_secret ? await getSharedForm().catch(() => null) : null;
   res.setHeader('Cache-Control', 'no-store');
   res.json({ url: sharedFormLink(shared, sessionId) });
+});
+
+// GET: /api/forms/prefill/:sessionId?callsign=&dep=... - opens the shared form with a
+// pilot's details filled in (used by the PFTracker "Send to StripLink" bookmarklet)
+router.get('/prefill/:sessionId', async (req, res) => {
+  const sessionId = validSessionParam(req.params.sessionId);
+  const back = (msg: string, status = 400) =>
+    res
+      .status(status)
+      .type('text/plain')
+      .send(`${msg}\n\nAsk your controller for their StripLink link, or fill the flight plan in by hand.`);
+  if (!sessionId) return back('That StripLink session ID does not look right.');
+  const settings = await getFormSettings(sessionId);
+  if (!settings) return back(`StripLink session ${sessionId} was not found.`, 404);
+  if (!settings.form_webhook_secret) return back('This session is not taking Google Form flight plans right now.', 403);
+  const shared = await getSharedForm().catch(() => null);
+  if (!shared) return back('The StripLink flight plan form is not set up yet.', 503);
+  const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string).slice(0, 500) : undefined);
+  const link = buildPrefilledLink(shared, sessionId, {
+    roblox: q('roblox'),
+    callsign: q('callsign'),
+    aircraft: q('aircraft'),
+    rules: q('rules'),
+    dep: q('dep'),
+    arr: q('arr'),
+    level: q('level'),
+    route: q('route'),
+    remarks: q('remarks'),
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.redirect(302, link);
 });
 
 // ---------- owner settings ----------

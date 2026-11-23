@@ -15,6 +15,83 @@ export interface SharedFormConfig {
   editUrl: string | null;
   title: string | null;
   registeredAt: string;
+  /** The form's questions and their entry IDs, for building fully pre-filled links. */
+  fields?: SharedFormField[];
+}
+
+export interface SharedFormField {
+  title: string;
+  entry: string; // "entry.123456"
+  type: string; // TEXT, LIST, MULTIPLE_CHOICE, PARAGRAPH_TEXT, ...
+  choices?: string[];
+}
+
+/** Validates the fields list sent by the form's script. */
+export function parseFormFields(raw: unknown): SharedFormField[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: SharedFormField[] = [];
+  for (const f of raw.slice(0, 40)) {
+    if (!f || typeof f !== 'object') continue;
+    const { title, entry, type, choices } = f as Record<string, unknown>;
+    if (typeof title !== 'string' || typeof entry !== 'string' || !/^entry\.\d{1,15}$/.test(entry)) continue;
+    out.push({
+      title: title.slice(0, 120),
+      entry,
+      type: typeof type === 'string' ? type.slice(0, 32) : 'TEXT',
+      choices: Array.isArray(choices)
+        ? choices.filter((c): c is string => typeof c === 'string').slice(0, 300).map((c) => c.slice(0, 120))
+        : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+export interface PrefillValues {
+  roblox?: string;
+  callsign?: string;
+  aircraft?: string;
+  rules?: string;
+  dep?: string;
+  arr?: string;
+  level?: string;
+  route?: string;
+  remarks?: string;
+}
+
+const PREFILL_FIELDS: { key: keyof PrefillValues; titles: RegExp }[] = [
+  { key: 'roblox', titles: /roblox/i },
+  { key: 'callsign', titles: /^call ?sign/i },
+  { key: 'aircraft', titles: /^aircraft/i },
+  { key: 'rules', titles: /flight rules|^rules/i },
+  { key: 'dep', titles: /^departure/i },
+  { key: 'arr', titles: /^arrival/i },
+  { key: 'level', titles: /cruis|flight level|^level/i },
+  { key: 'route', titles: /^route/i },
+  { key: 'remarks', titles: /^remark/i },
+];
+
+/** A choice that matches the value: exact (IFR) or by ICAO prefix ("EGKK - London Gatwick ..."). */
+function matchChoice(choices: string[], value: string) {
+  const v = value.trim().toUpperCase();
+  return (
+    choices.find((c) => c.trim().toUpperCase() === v) ??
+    choices.find((c) => c.trim().toUpperCase().startsWith(`${v} `) || c.trim().toUpperCase().startsWith(`${v}-`))
+  );
+}
+
+/** Session link with as many questions pre-filled as the registered fields allow. */
+export function buildPrefilledLink(config: SharedFormConfig, sessionId: string, values: PrefillValues) {
+  const url = new URL(config.prefillTemplate.replace(SESSION_PLACEHOLDER, encodeURIComponent(sessionId)));
+  for (const { key, titles } of PREFILL_FIELDS) {
+    const value = values[key]?.trim();
+    if (!value) continue;
+    const field = config.fields?.find((f) => titles.test(f.title));
+    if (!field) continue;
+    let answer: string | undefined = value.slice(0, 500);
+    if (field.choices?.length) answer = matchChoice(field.choices, value);
+    if (answer) url.searchParams.set(field.entry, answer);
+  }
+  return url.toString();
 }
 
 /** Secret the shared form's Apps Script sends. FORMS_SHARED_SECRET, else derived from JWT_SECRET. */

@@ -1,0 +1,15 @@
+---
+import { SPA_SITE_URL } from '../lib/spaSeo';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PfTrackerContent from '@app/islands/PfTrackerContent';
+
+const PAGE_URL = `${SPA_SITE_URL}/pftracker`;
+---
+
+<BaseLayout
+  title="Send your PFTracker plan to StripLink"
+  description="One click copies the flight plan you filed on PFTracker into your controller's StripLink form."
+  canonicalUrl={PAGE_URL}
+>
+  <PfTrackerContent pathname={Astro.url.pathname} client:load />
+</BaseLayout>
