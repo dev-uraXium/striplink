@@ -24,12 +24,19 @@ export async function fetchPfTrackerPlan(robloxUsername: string): Promise<PfTrac
       headers: { 'User-Agent': 'StripLink (pilot-requested flight plan import)', Accept: 'application/json' },
       signal: AbortSignal.timeout(6000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status !== 404) {
+        const body = (await res.text().catch(() => '')).slice(0, 200).replace(/\s+/g, ' ');
+        console.warn(`[pftracker] ${res.status} for ${username}: ${body}`);
+      }
+      return null;
+    }
     const plan = (await res.json()) as PfTrackerPlan;
     if (!plan || plan.active === false) return null;
     if (plan.user && plan.user.toLowerCase() !== username.toLowerCase()) return null;
     return plan;
-  } catch {
+  } catch (err) {
+    console.warn('[pftracker] request failed:', err instanceof Error ? err.message : err);
     return null;
   }
 }
