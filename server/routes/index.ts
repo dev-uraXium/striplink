@@ -26,6 +26,7 @@ import turnRouter from './turn.js';
 import chartsRouter from './charts.js';
 import externalAcarsRouter from './externalAcars.js';
 import formsRouter from './forms.js';
+import popupsRouter from './popups.js';
 
 const router = express.Router();
 
@@ -55,5 +56,6 @@ router.use('/turn', turnRouter);
 router.use('/charts', chartsRouter);
 router.use('/external-acars', externalAcarsRouter);
 router.use('/forms', formsRouter);
+router.use('/popups', popupsRouter);
 
 export default router;
