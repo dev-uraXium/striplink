@@ -2,7 +2,6 @@ import { lazy, Suspense, useState } from 'react';
 import CanaryModal from './modals/CanaryModal';
 import UserAlertsModal from './modals/UserAlertsModal';
 import SurveyModal from './modals/SurveyModal';
-import BottomPopup from './BottomPopup';
 import { useAuth } from '../hooks/auth/useAuth';
 import { useActiveUpdateModal } from '../hooks/useActiveUpdateModal';
 import { useUserAlerts } from '../hooks/useUserAlerts';
@@ -33,7 +32,6 @@ export default function AppOverlays() {
         </Suspense>
       )}
       <UserAlertsModal alerts={alerts} onDismiss={dismiss} />
-      <BottomPopup />
       {survey && !canaryOpen && !showUpdateModal && alerts.length === 0 && (
         <SurveyModal survey={survey} onSubmitted={markSubmitted} />
       )}

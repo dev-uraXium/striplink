@@ -1,5 +1,4 @@
 import './loadIslandStyles';
-import BottomPopup from '../components/BottomPopup';
 import { AuthProvider } from '../hooks/auth/AuthProvider';
 import { SettingsProvider } from '../hooks/settings/SettingsProvider';
 import PilotPanel from '../pages/PilotPanel';
@@ -13,7 +12,6 @@ export default function PilotPanelContent({ pathname }: { pathname?: string }) {
         <SettingsProvider>
           <IsomorphicRouter pathname={pathname}>
             <PilotPanel />
-            <BottomPopup />
           </IsomorphicRouter>
         </SettingsProvider>
       </AuthProvider>

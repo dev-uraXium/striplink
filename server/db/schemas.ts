@@ -1249,32 +1249,6 @@ export async function ensureSessionsGoogleFormColumns() {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `.execute(mainDb);
-  // StripLink popups: admin-published cards at the bottom of the site (notices and quick polls)
-  await sql`
-    CREATE TABLE IF NOT EXISTS striplink_popups (
-      id serial PRIMARY KEY,
-      kind varchar(16) NOT NULL,
-      title varchar(120) NOT NULL,
-      body text NOT NULL DEFAULT '',
-      button_label varchar(40),
-      button_url text,
-      options jsonb NOT NULL DEFAULT '[]'::jsonb,
-      audience varchar(16) NOT NULL DEFAULT 'everyone',
-      active boolean NOT NULL DEFAULT false,
-      ends_at timestamptz,
-      created_by varchar(32),
-      created_at timestamptz NOT NULL DEFAULT now()
-    )
-  `.execute(mainDb);
-  await sql`
-    CREATE TABLE IF NOT EXISTS striplink_popup_votes (
-      popup_id integer NOT NULL REFERENCES striplink_popups(id) ON DELETE CASCADE,
-      voter varchar(128) NOT NULL,
-      option_idx smallint NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      PRIMARY KEY (popup_id, voter)
-    )
-  `.execute(mainDb);
 }
 
 export async function ensureControllerRatingsCommentAndSessionColumns() {
