@@ -1,4 +1,5 @@
 import './loadIslandStyles';
+import BottomPopup from '../components/BottomPopup';
 import { AuthProvider } from '../hooks/auth/AuthProvider';
 import HowToUsePFControl from '../pages/HowToUsePFControl';
 import { PostHogProviderWrapper } from './PostHogProviderWrapper';
@@ -14,6 +15,7 @@ export default function HowToUsePFControlContent({ pathname }: Props) {
       <AuthProvider>
         <IsomorphicRouter pathname={pathname}>
           <HowToUsePFControl />
+          <BottomPopup />
         </IsomorphicRouter>
       </AuthProvider>
     </PostHogProviderWrapper>
