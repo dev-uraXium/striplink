@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { clientApiUrl } from '../utils/clientApiBase';
 import type { ChartSourceState } from '../types/chartSources';
 
+// StripLink only shows openCharts. The other sources stay off whatever the
+// admin chart-source switches say.
 const ALL_ON: ChartSourceState = {
   opencharts: true,
-  pfatc: true,
-  cephie: true,
-  celesbit: true,
-  chartfox: true,
+  pfatc: false,
+  cephie: false,
+  celesbit: false,
+  chartfox: false,
 };
 
 let request: Promise<ChartSourceState> | null = null;
@@ -17,7 +19,7 @@ function loadSources() {
     .then((res) => (res.ok ? res.json() : { sources: ALL_ON }))
     .then((data: { sources?: Partial<ChartSourceState> }) => ({
       ...ALL_ON,
-      ...data.sources,
+      opencharts: data.sources?.opencharts ?? true,
     }))
     .catch(() => {
       request = null;

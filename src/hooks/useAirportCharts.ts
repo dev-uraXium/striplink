@@ -47,19 +47,23 @@ export function useAirportCharts() {
 
   useEffect(() => {
     let cancelled = false;
-    loadIndex().then((result) => {
-      if (!cancelled) setIndex(result);
-    });
     loadOpenCharts().then((result) => {
       if (!cancelled && result) setOpenCharts(openChartsByAirport(result));
     });
-    loadCephieIndex().then((result) => {
-      if (!cancelled) setCephieIndex(result);
-    });
+    // Cephie and Celesbit charts are off in StripLink (openCharts only), so
+    // their indexes are only fetched if those sources are ever switched back on.
+    if (sources?.cephie)
+      loadCephieIndex().then((result) => {
+        if (!cancelled) setCephieIndex(result);
+      });
+    if (sources?.celesbit)
+      loadIndex().then((result) => {
+        if (!cancelled) setIndex(result);
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sources?.cephie, sources?.celesbit]);
 
   const getLocalCharts = useCallback(
     (icao: string): ChartEntry[] => {
